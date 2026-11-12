@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  neuraldesk:
+    build: .
+    container_name: neuraldesk-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - neuraldesk-data:/app/backend/data
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+    restart: unless-stopped
+
+volumes:
+  neuraldesk-data:
