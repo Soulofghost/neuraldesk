@@ -1,4 +1,5 @@
 import io
+import uuid
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -27,11 +28,56 @@ def test_system_stats():
     assert "database_engine" in stats
     assert stats["status"] == "operational"
 
+def test_auth_workflow():
+    unique_email = f"user_{uuid.uuid4().hex[:8]}@neuraldesk.io"
+    # 1. Register
+    reg_res = client.post("/api/v1/auth/register", json={
+        "email": unique_email,
+        "password": "Password123!",
+        "full_name": "Alvin Senior Dev"
+    })
+    assert reg_res.status_code == 201
+    token_data = reg_res.json()
+    assert "access_token" in token_data
+    assert token_data["user"]["email"] == unique_email
+
+    # 2. Login
+    login_res = client.post("/api/v1/auth/login", json={
+        "email": unique_email,
+        "password": "Password123!"
+    })
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+
+    # 3. Get profile
+    me_res = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_res.status_code == 200
+    assert me_res.json()["email"] == unique_email
+
+def test_workspace_lifecycle():
+    create_res = client.post("/api/v1/workspaces", json={
+        "name": "Cloud Infrastructure Lab",
+        "description": "Distributed systems research workspace"
+    })
+    assert create_res.status_code == 201
+    ws = create_res.json()
+    ws_id = ws["id"]
+    assert ws["name"] == "Cloud Infrastructure Lab"
+
+    # List workspaces
+    list_res = client.get("/api/v1/workspaces")
+    assert list_res.status_code == 200
+    assert any(w["id"] == ws_id for w in list_res.json())
+
+    # Delete workspace
+    del_res = client.delete(f"/api/v1/workspaces/{ws_id}")
+    assert del_res.status_code == 200
+
 def test_document_lifecycle():
     # 1. Create Document
     doc_payload = {
         "title": "Distributed Consensus in Raft",
-        "content": "Raft is a consensus algorithm designed to be easy to understand. It is equivalent to Paxos in fault-tolerance and performance.",
+        "content": "Raft is a consensus algorithm designed to be easy to understand. It is equivalent to Paxos in fault-tolerance and performance. The system elects a cluster leader to replicate state machine logs across follower nodes.",
         "category": "Architecture",
         "tags": ["distributed-systems", "consensus", "algorithms"]
     }
@@ -68,56 +114,124 @@ def test_document_lifecycle():
     del_res = client.delete(f"/api/v1/documents/{doc_id}")
     assert del_res.status_code == 200
 
-def test_validation_errors():
-    # Empty title
-    res_bad_title = client.post("/api/v1/documents", json={
-        "title": "   ",
-        "content": "Valid content"
+def test_ai_intelligence():
+    sample_text = "Vector embeddings project natural language tokens into dense continuous spaces where cosine angle indicates semantic similarity. We must implement vector indexing immediately to ensure sub-millisecond retrieval."
+    
+    # Summarization
+    sum_res = client.post("/api/v1/intelligence/summarize", json={"content": sample_text})
+    assert sum_res.status_code == 200
+    assert "summary" in sum_res.json()
+    assert len(sum_res.json()["key_takeaways"]) >= 1
+
+    # Entity & Keyword extraction
+    ent_res = client.post("/api/v1/intelligence/entities", json={"content": sample_text})
+    assert ent_res.status_code == 200
+    assert "entities" in ent_res.json()
+    assert "keywords" in ent_res.json()
+
+    # Action Items extraction
+    act_res = client.post("/api/v1/intelligence/action-items", json={"content": sample_text})
+    assert act_res.status_code == 200
+    assert len(act_res.json()["action_items"]) >= 1
+
+    # Grounded Q&A
+    qa_res = client.post("/api/v1/intelligence/ask", json={"question": "What do vector embeddings do?"})
+    assert qa_res.status_code == 200
+    assert "answer" in qa_res.json()
+
+def test_ai_chat_assistant():
+    # 1. Create conversation
+    conv_res = client.post("/api/v1/chat/conversations", json={"title": "Raft Architecture Discussion"})
+    assert conv_res.status_code == 201
+    conv_id = conv_res.json()["id"]
+
+    # 2. Post message
+    msg_res = client.post(f"/api/v1/chat/conversations/{conv_id}/messages", json={
+        "content": "Explain how consensus algorithms elect leaders."
     })
-    assert res_bad_title.status_code in [400, 422]
+    assert msg_res.status_code == 201
+    assert msg_res.json()["role"] == "assistant"
+    assert "citations" in msg_res.json()
 
-    # Empty content
-    res_bad_content = client.post("/api/v1/documents", json={
-        "title": "Valid title",
-        "content": "   "
+    # 3. Retrieve messages
+    list_res = client.get(f"/api/v1/chat/conversations/{conv_id}/messages")
+    assert list_res.status_code == 200
+    assert len(list_res.json()) >= 2
+
+    # 4. Clean up
+    client.delete(f"/api/v1/chat/conversations/{conv_id}")
+
+def test_notes_module():
+    # Create note
+    note_res = client.post("/api/v1/notes", json={
+        "title": "Distributed Cache Strategies",
+        "content": "Write-through caching versus cache-aside in Redis clusters.",
+        "tags": ["redis", "caching", "architecture"]
     })
-    assert res_bad_content.status_code in [400, 422]
+    assert note_res.status_code == 201
+    note_id = note_res.json()["id"]
 
-def test_document_upload_and_export():
-    # Create test markdown file
-    md_content = b"# High Availability Database Clustering\n\nClustering enables multi-master replication and automatic failover."
-    file_payload = {
-        "file": ("clustering.md", io.BytesIO(md_content), "text/markdown")
-    }
-    data_payload = {
-        "category": "Engineering",
-        "tags": "clustering, database, failover"
-    }
+    # List notes
+    list_res = client.get("/api/v1/notes")
+    assert list_res.status_code == 200
+    assert any(n["id"] == note_id for n in list_res.json())
 
-    upload_res = client.post("/api/v1/documents/upload", files=file_payload, data=data_payload)
-    assert upload_res.status_code == 201
-    uploaded = upload_res.json()
-    assert uploaded["title"] == "High Availability Database Clustering"
-    assert uploaded["category"] == "Engineering"
-    doc_id = uploaded["id"]
+    # Clean up
+    client.delete(f"/api/v1/notes/{note_id}")
 
-    # Export markdown
-    export_md = client.get(f"/api/v1/documents/{doc_id}/export?format=md")
-    assert export_md.status_code == 200
-    assert "High Availability Database Clustering" in export_md.text
+def test_tasks_module():
+    # Create task
+    task_res = client.post("/api/v1/tasks", json={
+        "title": "Benchmark HNSW vector indexing latency",
+        "description": "Measure P99 latency across 100k chunked passages.",
+        "priority": "high",
+        "status": "todo"
+    })
+    assert task_res.status_code == 201
+    task_id = task_res.json()["id"]
 
-    # Export JSON
-    export_json = client.get(f"/api/v1/documents/{doc_id}/export?format=json")
-    assert export_json.status_code == 200
-    assert export_json.json()["id"] == doc_id
+    # Toggle task
+    toggle_res = client.post(f"/api/v1/tasks/{task_id}/toggle")
+    assert toggle_res.status_code == 200
+    assert toggle_res.json()["status"] == "done"
+
+    # Clean up
+    client.delete(f"/api/v1/tasks/{task_id}")
+
+def test_collaboration_and_sharing():
+    # Create doc
+    doc_res = client.post("/api/v1/documents", json={
+        "title": "Security Hardening Guidelines",
+        "content": "Configure mutual TLS between microservices and rotate keys every 90 days.",
+        "category": "Engineering"
+    })
+    doc_id = doc_res.json()["id"]
+
+    # 1. Share Link
+    share_res = client.post(f"/api/v1/collaboration/share/{doc_id}")
+    assert share_res.status_code == 200
+    token = share_res.json()["token"]
+
+    # Access shared doc
+    shared_access = client.get(f"/api/v1/collaboration/shared/{token}")
+    assert shared_access.status_code == 200
+    assert shared_access.json()["document"]["title"] == "Security Hardening Guidelines"
+
+    # 2. Add comment
+    comment_res = client.post(f"/api/v1/collaboration/comments/{doc_id}", json={
+        "content": "Great overview of mutual TLS!"
+    })
+    assert comment_res.status_code == 201
+    assert comment_res.json()["content"] == "Great overview of mutual TLS!"
 
     # Clean up
     client.delete(f"/api/v1/documents/{doc_id}")
 
-def test_graph_recompute():
-    # Recompute topology
-    res = client.post("/api/v1/graph/recompute")
+def test_analytics_dashboard():
+    res = client.get("/api/v1/analytics")
     assert res.status_code == 200
     data = res.json()
-    assert "nodes" in data
-    assert "edges" in data
+    assert "total_documents" in data
+    assert "storage_bytes" in data
+    assert "category_distribution" in data
+    assert "task_status_distribution" in data

@@ -22,15 +22,26 @@
             <div class="brand">
                 <div class="brand-glyph">ND</div>
                 <div class="brand-text">
-                    <span class="brand-title">NeuralDesk</span>
-                    <span class="brand-subtitle">Knowledge Graph Engine</span>
+                    <span class="brand-title">NeuralDesk 2.0</span>
+                    <span class="brand-subtitle">Knowledge Graph & AI Engine</span>
                 </div>
                 <button id="btn-close-sidebar" class="btn-close-sidebar" aria-label="Close sidebar">&times;</button>
             </div>
 
+            <!-- Workspace Selector -->
+            <div class="sidebar-workspace">
+                <span class="section-label">WORKSPACE</span>
+                <div class="workspace-select-wrapper">
+                    <select id="workspace-select" class="select-field workspace-dropdown">
+                        <option value="1">Default Workspace</option>
+                    </select>
+                    <button id="btn-create-workspace" class="btn-icon" title="New Workspace">+</button>
+                </div>
+            </div>
+
             <div class="sidebar-action">
                 <button id="btn-new-doc" class="btn-primary">+ New Document</button>
-                <button id="btn-upload-doc" class="btn-secondary" title="Upload Markdown, Text, or JSON document">
+                <button id="btn-upload-doc" class="btn-secondary" title="Upload PDF, DOCX, TXT, MD, CSV, or JSON">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="17 8 12 3 7 8"></polyline>
@@ -38,7 +49,15 @@
                     </svg>
                     Import File
                 </button>
-                <input type="file" id="file-upload-input" accept=".md,.txt,.markdown,.json" style="display: none;">
+                <input type="file" id="file-upload-input" accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json" style="display: none;">
+            </div>
+
+            <!-- Document Status Views Filter -->
+            <div class="doc-view-filters">
+                <button class="view-chip active" data-view="active">Active</button>
+                <button class="view-chip" data-view="favorites">★ Favorites</button>
+                <button class="view-chip" data-view="archive">Archive</button>
+                <button class="view-chip" data-view="trash">Trash</button>
             </div>
 
             <div class="category-filter">
@@ -67,6 +86,13 @@
                     <span class="dot live"></span>
                     <span id="system-status-label" class="status-label">Engine Ready • Initializing...</span>
                 </div>
+                <div class="user-pill" id="user-profile-pill">
+                    <span class="user-avatar" id="sidebar-user-avatar">AD</span>
+                    <div class="user-info">
+                        <span class="user-name" id="sidebar-user-name">demo@neuraldesk.io</span>
+                        <span class="user-tier-badge" id="sidebar-tier-badge">PRO</span>
+                    </div>
+                </div>
             </div>
         </aside>
 
@@ -89,12 +115,126 @@
                     <span class="search-hint">Ctrl+K</span>
                 </div>
                 <div class="view-toggles">
-                    <button id="tab-doc" class="tab-btn active">Document View</button>
+                    <button id="tab-dashboard" class="tab-btn">Dashboard</button>
+                    <button id="tab-doc" class="tab-btn active">Documents</button>
+                    <button id="tab-chat" class="tab-btn">AI Assistant</button>
+                    <button id="tab-notes" class="tab-btn">Notes</button>
+                    <button id="tab-tasks" class="tab-btn">Tasks</button>
                     <button id="tab-graph" class="tab-btn">Concept Graph</button>
+                    <button id="tab-analytics" class="tab-btn">Analytics</button>
+                    <button id="tab-settings" class="tab-btn">Settings</button>
                 </div>
             </header>
 
-            <!-- Document Editor / Viewer Pane -->
+            <!-- 1. DASHBOARD PANE -->
+            <section id="dashboard-pane" class="workspace-pane">
+                <div class="dashboard-container">
+                    <div class="dashboard-header-banner">
+                        <div>
+                            <h2 class="dashboard-greeting">NeuralDesk Intelligence Hub</h2>
+                            <p class="dashboard-subtitle">Semantic telemetry, active workspace statistics, and knowledge telemetry</p>
+                        </div>
+                        <div class="dashboard-quick-actions">
+                            <button id="dash-btn-new-doc" class="btn-primary">+ Create Doc</button>
+                            <button id="dash-btn-upload" class="btn-secondary">Upload File</button>
+                            <button id="dash-btn-open-chat" class="btn-subtle">Ask AI Assistant</button>
+                        </div>
+                    </div>
+
+                    <!-- Metric Cards Grid -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon docs-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Documents</span>
+                                <span class="stat-value" id="dash-total-docs">0</span>
+                                <span class="stat-subtext" id="dash-active-docs">0 Active</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon chunks-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Vector Chunks</span>
+                                <span class="stat-value" id="dash-total-chunks">0</span>
+                                <span class="stat-subtext">Dense Embeddings</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon notes-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Knowledge Notes</span>
+                                <span class="stat-value" id="dash-total-notes">0</span>
+                                <span class="stat-subtext" id="dash-pinned-notes">0 Pinned</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon tasks-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Tasks</span>
+                                <span class="stat-value" id="dash-total-tasks">0</span>
+                                <span class="stat-subtext" id="dash-pending-tasks">0 Pending</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon storage-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Storage Used</span>
+                                <span class="stat-value" id="dash-storage-used">0 KB</span>
+                                <span class="stat-subtext" id="dash-storage-quota">of 500 MB quota</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dashboard Sections Grid -->
+                    <div class="dashboard-grid">
+                        <div class="dash-panel">
+                            <div class="dash-panel-header">
+                                <h3>Category &amp; Domain Breakdown</h3>
+                            </div>
+                            <div class="dash-panel-body" id="dash-category-distribution">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+
+                        <div class="dash-panel">
+                            <div class="dash-panel-header">
+                                <h3>Supported Document Formats</h3>
+                            </div>
+                            <div class="dash-panel-body" id="dash-format-distribution">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+
+                        <div class="dash-panel full-width">
+                            <div class="dash-panel-header">
+                                <h3>Recent System Activity &amp; Audit Log</h3>
+                                <button id="btn-refresh-activity" class="btn-subtle btn-sm">Refresh</button>
+                            </div>
+                            <div class="dash-panel-body">
+                                <div id="dash-activity-list" class="activity-timeline">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. DOCUMENT EDITOR / VIEWER PANE -->
             <section id="doc-pane" class="workspace-pane active">
                 <div class="doc-metadata-bar">
                     <input type="text" id="doc-title-input" class="doc-title-field" placeholder="Document Title...">
@@ -106,28 +246,160 @@
                             <option value="Research">Research</option>
                         </select>
                         <input type="text" id="doc-tags-input" class="tags-field" placeholder="tags (comma separated)">
-                        <button id="btn-save-doc" class="btn-save">Save & Index</button>
+                        <button id="btn-fav-doc" class="btn-subtle" title="Favorite document">★ Fav</button>
+                        <button id="btn-ai-intel" class="btn-subtle" title="AI Document Intelligence">⚡ AI Summary</button>
+                        <button id="btn-share-doc" class="btn-subtle" title="Create shareable link">🔗 Share</button>
+                        <button id="btn-save-doc" class="btn-save">Save &amp; Index</button>
                         <button id="btn-export-doc" class="btn-export" style="display:none;" title="Download Markdown">Export .MD</button>
                         <button id="btn-delete-doc" class="btn-delete" style="display:none;">Delete</button>
+                        <button id="btn-restore-doc" class="btn-restore" style="display:none;">Restore</button>
                     </div>
                 </div>
 
                 <div class="editor-container">
-                    <textarea id="doc-content-input" class="doc-editor" placeholder="Write markdown content or document documentation here... NeuralDesk automatically computes overlapping semantic chunks and graph relations on save. (You can also drop .md or .txt files directly here!)"></textarea>
+                    <textarea id="doc-content-input" class="doc-editor" placeholder="Write markdown content or documentation here... NeuralDesk automatically computes overlapping semantic chunks and graph relations on save. (You can also drop .pdf, .docx, .md, .txt, or .csv files directly here!)"></textarea>
                 </div>
 
                 <div class="doc-drawer">
                     <div class="drawer-header">
-                        <span class="drawer-title">Chunk & Relationship Telemetry</span>
+                        <div class="drawer-tabs">
+                            <button id="drawer-tab-telemetry" class="drawer-tab active">Vector Telemetry</button>
+                            <button id="drawer-tab-comments" class="drawer-tab">Comments</button>
+                        </div>
                         <span id="chunk-info" class="drawer-stats">0 Chunks Generated</span>
                     </div>
                     <div id="drawer-content" class="drawer-body">
                         <div class="empty-state">Select or save a document to inspect indexed vector chunks and semantic graph connections.</div>
                     </div>
+                    <div id="drawer-comments-pane" class="drawer-body" style="display: none;">
+                        <div class="comments-container">
+                            <div id="doc-comments-list" class="comments-list"></div>
+                            <div class="comment-input-box">
+                                <input type="text" id="doc-comment-input" placeholder="Add a team comment or note...">
+                                <button id="btn-submit-comment" class="btn-secondary btn-sm">Post</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
-            <!-- Graph Canvas Pane -->
+            <!-- 3. AI ASSISTANT CONVERSATIONAL PANE -->
+            <section id="chat-pane" class="workspace-pane">
+                <div class="chat-container">
+                    <!-- Conversations Sidebar -->
+                    <div class="chat-sidebar">
+                        <div class="chat-sidebar-header">
+                            <span>CONVERSATIONS</span>
+                            <button id="btn-new-chat" class="btn-icon" title="New Chat">+</button>
+                        </div>
+                        <div id="chat-conversation-list" class="chat-sessions-list">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Chat Main Interface -->
+                    <div class="chat-main">
+                        <div class="chat-header">
+                            <div class="chat-header-info">
+                                <h3 id="chat-active-title">Workspace AI Research Assistant</h3>
+                                <span class="chat-model-badge">NeuralDesk RAG Engine</span>
+                            </div>
+                            <div class="chat-scope-selector">
+                                <label for="chat-scope-select">Context Scope:</label>
+                                <select id="chat-scope-select" class="select-field">
+                                    <option value="workspace">Entire Workspace</option>
+                                    <option value="document">Selected Document Only</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Suggested prompt chips -->
+                        <div class="chat-prompt-chips">
+                            <button class="prompt-chip" data-prompt="Summarize the core architectural design and trade-offs in this workspace.">💡 Summarize Core Architecture</button>
+                            <button class="prompt-chip" data-prompt="Extract all action items, tasks, and follow-ups from the documents.">📋 Extract Action Items</button>
+                            <button class="prompt-chip" data-prompt="Explain data consistency and replication strategies described here.">🔄 Explain Data Consistency</button>
+                        </div>
+
+                        <!-- Chat Messages Window -->
+                        <div id="chat-messages-container" class="chat-messages">
+                            <div class="chat-message assistant">
+                                <div class="message-avatar">ND</div>
+                                <div class="message-content">
+                                    <p>Hello! I am your <strong>NeuralDesk AI Assistant</strong>. Ask me anything about your documents, architecture notes, or research papers. All answers are grounded with vector citations directly from your workspace.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Chat Input Box -->
+                        <div class="chat-input-bar">
+                            <textarea id="chat-query-input" rows="1" placeholder="Ask a question about your knowledge base... (Shift+Enter for new line)"></textarea>
+                            <button id="btn-send-chat" class="btn-primary">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. NOTES PANE -->
+            <section id="notes-pane" class="workspace-pane">
+                <div class="notes-container">
+                    <div class="notes-toolbar">
+                        <div class="notes-search-box">
+                            <input type="text" id="notes-search-input" placeholder="Filter notes by title, tag, or content...">
+                        </div>
+                        <button id="btn-create-note" class="btn-primary">+ New Note</button>
+                    </div>
+                    <div id="notes-grid" class="notes-grid">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. TASKS / ACTION ITEMS PANE -->
+            <section id="tasks-pane" class="workspace-pane">
+                <div class="tasks-container">
+                    <div class="tasks-toolbar">
+                        <div>
+                            <h2 style="font-size:18px; font-weight:700;">Action Items &amp; Task Pipeline</h2>
+                            <p style="font-size:12px; color:var(--text-secondary);">Manage engineering deliverables, research milestones, and extracted document action items</p>
+                        </div>
+                        <div class="tasks-actions">
+                            <button id="btn-auto-extract-tasks" class="btn-subtle" title="Extract actionable tasks from current document using AI">⚡ Auto-Extract From Doc</button>
+                            <button id="btn-create-task" class="btn-primary">+ Add Task</button>
+                        </div>
+                    </div>
+
+                    <!-- Kanban Board Columns -->
+                    <div class="kanban-board">
+                        <div class="kanban-column" data-status="todo">
+                            <div class="kanban-header">
+                                <span class="kanban-title"><span class="status-indicator-dot todo"></span> To Do</span>
+                                <span id="count-todo" class="counter">0</span>
+                            </div>
+                            <div id="tasks-list-todo" class="kanban-cards"></div>
+                        </div>
+
+                        <div class="kanban-column" data-status="in_progress">
+                            <div class="kanban-header">
+                                <span class="kanban-title"><span class="status-indicator-dot in-progress"></span> In Progress</span>
+                                <span id="count-in-progress" class="counter">0</span>
+                            </div>
+                            <div id="tasks-list-in-progress" class="kanban-cards"></div>
+                        </div>
+
+                        <div class="kanban-column" data-status="done">
+                            <div class="kanban-header">
+                                <span class="kanban-title"><span class="status-indicator-dot done"></span> Completed</span>
+                                <span id="count-done" class="counter">0</span>
+                            </div>
+                            <div id="tasks-list-done" class="kanban-cards"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6. GRAPH CANVAS PANE -->
             <section id="graph-pane" class="workspace-pane">
                 <div class="graph-toolbar">
                     <div class="graph-legends">
@@ -144,8 +416,105 @@
                     <svg id="graph-svg" class="graph-canvas" width="100%" height="100%"></svg>
                 </div>
             </section>
+
+            <!-- 7. ANALYTICS PANE -->
+            <section id="analytics-pane" class="workspace-pane">
+                <div class="analytics-container">
+                    <div class="analytics-header">
+                        <h2>Workspace Telemetry &amp; Storage Quotas</h2>
+                        <p style="font-size:12px; color:var(--text-secondary);">Production vector indexing, database telemetry, and activity distribution</p>
+                    </div>
+
+                    <div class="analytics-grid">
+                        <div class="dash-panel">
+                            <div class="dash-panel-header"><h3>Storage Allocation</h3></div>
+                            <div class="dash-panel-body">
+                                <div class="storage-bar-wrapper">
+                                    <div class="storage-bar-track">
+                                        <div id="storage-bar-fill" class="storage-bar-fill" style="width: 2%;"></div>
+                                    </div>
+                                    <div class="storage-legend">
+                                        <span id="analytics-storage-val">0 KB</span>
+                                        <span id="analytics-quota-val">500 MB Quota</span>
+                                    </div>
+                                </div>
+                                <div style="font-size:12px; color:var(--text-muted); margin-top:14px; line-height: 1.6;">
+                                    Persistent storage engine: <strong id="analytics-db-engine" style="color:var(--accent-amber);">SQLite / Neon PostgreSQL</strong>.<br>
+                                    Files and vector embeddings are stored permanently in transaction-safe relational tables.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dash-panel">
+                            <div class="dash-panel-header"><h3>AI &amp; Chunker Performance</h3></div>
+                            <div class="dash-panel-body">
+                                <div class="analytics-stat-row">
+                                    <span>Average Chunks / Document:</span>
+                                    <strong id="analytics-avg-chunks">0</strong>
+                                </div>
+                                <div class="analytics-stat-row">
+                                    <span>Vector Embedding Model:</span>
+                                    <strong>Dense Lexical-Semantic Sim (384-d normalized)</strong>
+                                </div>
+                                <div class="analytics-stat-row">
+                                    <span>Search Algorithm:</span>
+                                    <strong>Hybrid Dense Cosine + Reciprocal Rank Fusion</strong>
+                                </div>
+                                <div class="analytics-stat-row">
+                                    <span>Active Workspace ID:</span>
+                                    <strong id="analytics-workspace-id">1</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 8. SETTINGS & WORKSPACE PANE -->
+            <section id="settings-pane" class="workspace-pane">
+                <div class="settings-container">
+                    <div class="settings-section">
+                        <h3>Workspace Information</h3>
+                        <div class="settings-form-row">
+                            <label>Current Active Workspace:</label>
+                            <input type="text" id="settings-ws-name" class="select-field" readonly>
+                        </div>
+                        <div class="settings-form-row">
+                            <label>Workspace Slug:</label>
+                            <input type="text" id="settings-ws-slug" class="select-field" readonly>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Account &amp; SaaS Subscription Tier</h3>
+                        <div class="settings-form-row">
+                            <label>Account Email:</label>
+                            <input type="text" id="settings-user-email" class="select-field" readonly>
+                        </div>
+                        <div class="settings-form-row">
+                            <label>Subscription Plan:</label>
+                            <select id="settings-user-plan" class="select-field">
+                                <option value="free">Free Tier (100 MB, 100 docs)</option>
+                                <option value="pro">Pro Tier (500 MB, Unlimited docs)</option>
+                                <option value="enterprise">Enterprise Tier (5 GB, Priority AI)</option>
+                            </select>
+                            <button id="btn-save-plan" class="btn-primary" style="width:auto; margin-top:8px;">Update Plan</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Appearance &amp; Theme</h3>
+                        <div class="theme-toggle-row">
+                            <span>Interface Theme:</span>
+                            <button id="btn-toggle-theme" class="btn-subtle">Switch to Light Theme</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
+
+    <!-- MODALS -->
 
     <!-- Search Modal -->
     <div id="search-modal" class="modal-overlay">
@@ -156,6 +525,148 @@
             </div>
             <div id="search-results-list" class="results-container">
                 <!-- Search results injected here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Intelligence Modal (Summary, Takeaways, Entities, Action Items) -->
+    <div id="ai-intel-modal" class="modal-overlay">
+        <div class="modal-window wide">
+            <div class="modal-header">
+                <h3>AI Document Intelligence</h3>
+                <button id="btn-close-intel-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div id="ai-intel-body" class="modal-body-scroll">
+                <div class="intel-section">
+                    <h4>Executive Summary</h4>
+                    <p id="intel-summary-text" class="intel-text"></p>
+                </div>
+                <div class="intel-section">
+                    <h4>Key Takeaways</h4>
+                    <ul id="intel-takeaways-list" class="intel-list"></ul>
+                </div>
+                <div class="intel-section">
+                    <h4>Identified Entities &amp; Concepts</h4>
+                    <div id="intel-entities-chips" class="intel-chips"></div>
+                </div>
+                <div class="intel-section">
+                    <h4>Extracted Action Items</h4>
+                    <ul id="intel-actions-list" class="intel-list"></ul>
+                    <button id="btn-convert-intel-tasks" class="btn-secondary btn-sm" style="margin-top: 8px;">+ Convert to Tasks</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Link Modal -->
+    <div id="share-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3>Share Document</h3>
+                <button id="btn-close-share-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Create a persistent public link to share this document with collaborators:</p>
+                <div class="share-input-group">
+                    <input type="text" id="share-link-input" readonly class="select-field">
+                    <button id="btn-copy-share-link" class="btn-primary">Copy Link</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Workspace Modal -->
+    <div id="workspace-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3>Create New Workspace</h3>
+                <button id="btn-close-ws-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Workspace Name:</label>
+                    <input type="text" id="new-ws-name" class="select-field" placeholder="e.g. AI Research Lab">
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                    <label>Description:</label>
+                    <input type="text" id="new-ws-desc" class="select-field" placeholder="Brief workspace description">
+                </div>
+                <button id="btn-submit-new-ws" class="btn-primary" style="margin-top:16px;">Create Workspace</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Modal -->
+    <div id="task-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3 id="task-modal-title">Create Task</h3>
+                <button id="btn-close-task-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Task Title:</label>
+                    <input type="text" id="task-title-input" class="select-field" placeholder="e.g. Implement Raft heartbeat interval">
+                </div>
+                <div class="form-group" style="margin-top:10px;">
+                    <label>Description:</label>
+                    <textarea id="task-desc-input" class="select-field" rows="3" placeholder="Optional details..."></textarea>
+                </div>
+                <div class="form-group-row" style="margin-top:10px;">
+                    <div>
+                        <label>Priority:</label>
+                        <select id="task-priority-select" class="select-field">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Status:</label>
+                        <select id="task-status-select" class="select-field">
+                            <option value="todo" selected>To Do</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="done">Completed</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top:10px;">
+                    <label>Due Date:</label>
+                    <input type="date" id="task-due-date" class="select-field">
+                </div>
+                <button id="btn-submit-task" class="btn-primary" style="margin-top:16px;">Save Task</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Note Modal -->
+    <div id="note-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3 id="note-modal-title">Create Knowledge Note</h3>
+                <button id="btn-close-note-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Note Title:</label>
+                    <input type="text" id="note-title-input" class="select-field" placeholder="Note Title...">
+                </div>
+                <div class="form-group" style="margin-top:10px;">
+                    <label>Content:</label>
+                    <textarea id="note-content-input" class="select-field" rows="5" placeholder="Write thoughts, snippets, or takeaways..."></textarea>
+                </div>
+                <div class="form-group" style="margin-top:10px;">
+                    <label>Tags (comma separated):</label>
+                    <input type="text" id="note-tags-input" class="select-field" placeholder="idea, architecture, research">
+                </div>
+                <div class="form-group" style="margin-top:10px;">
+                    <label>Link to Document (Optional):</label>
+                    <select id="note-doc-link-select" class="select-field">
+                        <option value="">-- No Linked Document --</option>
+                    </select>
+                </div>
+                <button id="btn-submit-note" class="btn-primary" style="margin-top:16px;">Save Note</button>
             </div>
         </div>
     </div>

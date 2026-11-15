@@ -7,7 +7,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.database import init_db, is_postgres_configured, get_db_connection
-from app.routers import documents, search, graph
+from app.routers import (
+    auth,
+    workspaces,
+    documents,
+    intelligence,
+    chat,
+    notes,
+    tasks,
+    search,
+    graph,
+    collaboration,
+    analytics,
+    admin
+)
 from app.schemas import SystemStats
 
 logging.basicConfig(
@@ -17,9 +30,9 @@ logging.basicConfig(
 logger = logging.getLogger("neuraldesk")
 
 app = FastAPI(
-    title="NeuralDesk API",
-    description="AI-Powered Knowledge Management Platform with Subword Vector Retrieval & Graph Topology",
-    version="1.1.0",
+    title="NeuralDesk 2.0 API",
+    description="Enterprise AI-Powered Knowledge Management Platform with Subword Vector Retrieval, Graph Topology & Conversational RAG",
+    version="2.0.0",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
@@ -53,13 +66,22 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "An internal server error occurred. Please verify your request parameters."}
     )
 
-# Initialize database schema
+# Initialize database schema and tables
 init_db()
 
-# Mount API Routers
+# Mount All Core Application API Routers
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(workspaces.router, prefix="/api/v1")
 app.include_router(documents.router, prefix="/api/v1")
+app.include_router(intelligence.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
+app.include_router(notes.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(graph.router, prefix="/api/v1")
+app.include_router(collaboration.router, prefix="/api/v1")
+app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 
 @app.get("/api/v1/health")
 def health_check():
@@ -67,7 +89,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "NeuralDesk Knowledge Engine",
-        "version": "1.1.0",
+        "version": "2.0.0",
         "database": f"{db_engine}_active"
     }
 
@@ -75,22 +97,22 @@ def health_check():
 def system_stats():
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT count(*) as cnt FROM documents")
+        cursor.execute("SELECT count(*) as cnt FROM documents WHERE is_trash = 0")
         doc_count = cursor.fetchone()["cnt"]
-        
+
         cursor.execute("SELECT count(*) as cnt FROM document_chunks")
         chunk_count = cursor.fetchone()["cnt"]
-        
+
         cursor.execute("SELECT count(*) as cnt FROM graph_edges")
         edge_count = cursor.fetchone()["cnt"]
-        
+
         db_engine = "PostgreSQL (Neon/Supabase)" if is_postgres_configured() else "SQLite WAL"
         return SystemStats(
             total_documents=int(doc_count),
             total_chunks=int(chunk_count),
             total_edges=int(edge_count),
             database_engine=db_engine,
-            version="1.1.0",
+            version="2.0.0",
             status="operational"
         )
 

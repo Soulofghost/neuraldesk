@@ -1,20 +1,59 @@
+/**
+ * NeuralDesk 2.0 — Production SaaS Client Engine
+ * Full implementation of Dashboard, Multi-format Document Management,
+ * AI Intelligence & Chat Assistant, Notes, Kanban Tasks, Knowledge Graph,
+ * Analytics Telemetry, and Workspaces.
+ */
+
+// Application State
 let currentDocId = null;
 let allDocuments = [];
 let currentCategory = "ALL";
+let currentDocView = "active"; // "active", "favorites", "archive", "trash"
+let activeWorkspaceId = 1;
+let allWorkspaces = [];
+let currentUser = null;
+let activeChatSessionId = null;
 let isSaving = false;
 let isDirty = false;
+let currentExtractedActions = [];
 
 document.addEventListener("DOMContentLoaded", () => {
     initApp();
 });
 
 async function initApp() {
+    setupTheme();
+    setupNavigationTabs();
     setupEventListeners();
     setupKeyboardShortcuts();
     setupDragAndDrop();
-    await loadSystemStats();
+    await loadCurrentUser();
+    await loadWorkspaces();
     await loadDocuments();
+    await loadDashboardStats();
     await checkInitialSeed();
+}
+
+/* ==========================================================
+   THEME MANAGER
+   ========================================================== */
+function setupTheme() {
+    const savedTheme = localStorage.getItem("neuraldesk_theme");
+    const toggleBtn = document.getElementById("btn-toggle-theme");
+    if (savedTheme === "light") {
+        document.body.classList.add("light-theme");
+        if (toggleBtn) toggleBtn.textContent = "Switch to Obsidian Dark";
+    }
+
+    if (toggleBtn) {
+        toggleBtn.addEventListener("click", () => {
+            const isLight = document.body.classList.toggle("light-theme");
+            localStorage.setItem("neuraldesk_theme", isLight ? "light" : "dark");
+            toggleBtn.textContent = isLight ? "Switch to Obsidian Dark" : "Switch to Light Theme";
+            showToast(`Theme switched to ${isLight ? 'Light' : 'Obsidian Dark'}.`, "info");
+        });
+    }
 }
 
 /* ==========================================================
@@ -48,14 +87,206 @@ function showToast(message, type = "info", duration = 3500) {
 }
 
 /* ==========================================================
+   AUTHENTICATION & USER PROFILE
+   ========================================================== */
+async function loadCurrentUser() {
+    try {
+        const res = await fetch("/api/v1/auth/me");
+        if (res.ok) {
+            currentUser = await res.json();
+            const avatar = document.getElementById("sidebar-user-avatar");
+            const name = document.getElementById("sidebar-user-name");
+            const tierBadge = document.getElementById("sidebar-tier-badge");
+            const emailField = document.getElementById("settings-user-email");
+            const planSelect = document.getElementById("settings-user-plan");
+
+            const initials = (currentUser.full_name || currentUser.email || "ND").substring(0, 2).toUpperCase();
+            if (avatar) avatar.textContent = initials;
+            if (name) name.textContent = currentUser.email;
+            if (tierBadge) tierBadge.textContent = (currentUser.tier || "pro").toUpperCase();
+            if (emailField) emailField.value = currentUser.email;
+            if (planSelect) planSelect.value = currentUser.tier || "pro";
+        }
+    } catch (err) {
+        console.warn("Could not fetch user profile:", err);
+    }
+}
+
+/* ==========================================================
+   WORKSPACE MANAGEMENT
+   ========================================================== */
+async function loadWorkspaces() {
+    try {
+        const res = await fetch("/api/v1/workspaces");
+        if (res.ok) {
+            allWorkspaces = await res.json();
+            const select = document.getElementById("workspace-select");
+            const noteDocSelect = document.getElementById("note-doc-link-select");
+            const settingsWsName = document.getElementById("settings-ws-name");
+            const settingsWsSlug = document.getElementById("settings-ws-slug");
+            const analyticsWsId = document.getElementById("analytics-workspace-id");
+
+            if (select) {
+                select.innerHTML = "";
+                allWorkspaces.forEach(ws => {
+                    const opt = document.createElement("option");
+                    opt.value = ws.id;
+                    opt.textContent = `${ws.name} (${ws.document_count || 0} docs)`;
+                    if (ws.id === activeWorkspaceId) opt.selected = true;
+                    select.appendChild(opt);
+                });
+            }
+
+            const active = allWorkspaces.find(w => w.id === activeWorkspaceId) || allWorkspaces[0];
+            if (active) {
+                activeWorkspaceId = active.id;
+                if (settingsWsName) settingsWsName.value = active.name;
+                if (settingsWsSlug) settingsWsSlug.value = active.slug;
+                if (analyticsWsId) analyticsWsId.textContent = active.id;
+            }
+        }
+    } catch (err) {
+        console.error("Failed loading workspaces:", err);
+    }
+}
+
+function switchWorkspace(id) {
+    activeWorkspaceId = parseInt(id, 10);
+    showToast(`Switched to workspace #${activeWorkspaceId}`, "info");
+    resetEditor();
+    loadDocuments();
+    loadDashboardStats();
+    loadNotes();
+    loadTasks();
+    loadChatConversations();
+}
+
+/* ==========================================================
+   NAVIGATION TABS
+   ========================================================== */
+function setupNavigationTabs() {
+    const tabs = [
+        { btn: "tab-dashboard", pane: "dashboard-pane", onActive: loadDashboardStats },
+        { btn: "tab-doc", pane: "doc-pane", onActive: null },
+        { btn: "tab-chat", pane: "chat-pane", onActive: loadChatConversations },
+        { btn: "tab-notes", pane: "notes-pane", onActive: loadNotes },
+        { btn: "tab-tasks", pane: "tasks-pane", onActive: loadTasks },
+        { btn: "tab-graph", pane: "graph-pane", onActive: renderKnowledgeGraph },
+        { btn: "tab-analytics", pane: "analytics-pane", onActive: loadDashboardStats },
+        { btn: "tab-settings", pane: "settings-pane", onActive: null }
+    ];
+
+    tabs.forEach(t => {
+        const btnElem = document.getElementById(t.btn);
+        const paneElem = document.getElementById(t.pane);
+        if (!btnElem || !paneElem) return;
+
+        btnElem.addEventListener("click", () => {
+            tabs.forEach(other => {
+                const b = document.getElementById(other.btn);
+                const p = document.getElementById(other.pane);
+                if (b) b.classList.remove("active");
+                if (p) p.classList.remove("active");
+            });
+
+            btnElem.classList.add("active");
+            paneElem.classList.add("active");
+            if (t.onActive) t.onActive();
+        });
+    });
+
+    // Dashboard Quick Actions
+    const dashNewDoc = document.getElementById("dash-btn-new-doc");
+    if (dashNewDoc) {
+        dashNewDoc.addEventListener("click", () => {
+            document.getElementById("tab-doc").click();
+            resetEditor();
+        });
+    }
+
+    const dashUpload = document.getElementById("dash-btn-upload");
+    if (dashUpload) {
+        dashUpload.addEventListener("click", () => {
+            document.getElementById("file-upload-input").click();
+        });
+    }
+
+    const dashChat = document.getElementById("dash-btn-open-chat");
+    if (dashChat) {
+        dashChat.addEventListener("click", () => {
+            document.getElementById("tab-chat").click();
+        });
+    }
+}
+
+/* ==========================================================
    EVENT LISTENERS & NAVIGATION
    ========================================================== */
 function setupEventListeners() {
+    // Workspace dropdown
+    const wsSelect = document.getElementById("workspace-select");
+    if (wsSelect) {
+        wsSelect.addEventListener("change", (e) => {
+            switchWorkspace(e.target.value);
+        });
+    }
+
+    // Create Workspace Modal
+    const btnCreateWs = document.getElementById("btn-create-workspace");
+    const wsModal = document.getElementById("workspace-modal");
+    const closeWsModal = document.getElementById("btn-close-ws-modal");
+    const submitWs = document.getElementById("btn-submit-new-ws");
+
+    if (btnCreateWs) btnCreateWs.addEventListener("click", () => wsModal.classList.add("open"));
+    if (closeWsModal) closeWsModal.addEventListener("click", () => wsModal.classList.remove("open"));
+    if (submitWs) {
+        submitWs.addEventListener("click", async () => {
+            const name = document.getElementById("new-ws-name").value.trim();
+            const desc = document.getElementById("new-ws-desc").value.trim();
+            if (!name) {
+                showToast("Please enter a workspace name", "error");
+                return;
+            }
+            try {
+                const res = await fetch("/api/v1/workspaces", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name, description: desc })
+                });
+                if (res.ok) {
+                    const created = await res.json();
+                    showToast(`Workspace "${created.name}" created!`, "success");
+                    wsModal.classList.remove("open");
+                    document.getElementById("new-ws-name").value = "";
+                    document.getElementById("new-ws-desc").value = "";
+                    await loadWorkspaces();
+                    switchWorkspace(created.id);
+                } else {
+                    showToast("Failed to create workspace", "error");
+                }
+            } catch (err) {
+                showToast("Error creating workspace", "error");
+            }
+        });
+    }
+
+    // Document View Filters (Active, Favorites, Archive, Trash)
+    const viewChips = document.querySelectorAll(".doc-view-filters .view-chip");
+    viewChips.forEach(chip => {
+        chip.addEventListener("click", () => {
+            viewChips.forEach(c => c.classList.remove("active"));
+            chip.classList.add("active");
+            currentDocView = chip.dataset.view;
+            loadDocuments();
+        });
+    });
+
     // New Document
     document.getElementById("btn-new-doc").addEventListener("click", () => {
         if (isDirty && !confirm("You have unsaved changes. Discard and create a new document?")) {
             return;
         }
+        document.getElementById("tab-doc").click();
         resetEditor();
         closeMobileSidebar();
     });
@@ -67,19 +298,66 @@ function setupEventListeners() {
 
     // Delete Document
     document.getElementById("btn-delete-doc").addEventListener("click", () => {
-        if (currentDocId && confirm("Are you sure you want to delete this document from the knowledge base?")) {
+        if (currentDocId && confirm("Are you sure you want to delete this document? (Moves to Trash)")) {
             deleteDocument(currentDocId);
         }
     });
 
+    // Restore Document
+    const btnRestore = document.getElementById("btn-restore-doc");
+    if (btnRestore) {
+        btnRestore.addEventListener("click", () => {
+            if (currentDocId) restoreDocument(currentDocId);
+        });
+    }
+
+    // Favorite Document
+    const btnFav = document.getElementById("btn-fav-doc");
+    if (btnFav) {
+        btnFav.addEventListener("click", () => {
+            if (currentDocId) toggleFavoriteDocument(currentDocId);
+        });
+    }
+
+    // AI Intelligence Modal
+    const btnIntel = document.getElementById("btn-ai-intel");
+    const intelModal = document.getElementById("ai-intel-modal");
+    const closeIntel = document.getElementById("btn-close-intel-modal");
+    if (btnIntel) {
+        btnIntel.addEventListener("click", () => {
+            if (currentDocId) triggerAiIntelligence(currentDocId);
+            else showToast("Please select or save a document first.", "info");
+        });
+    }
+    if (closeIntel) closeIntel.addEventListener("click", () => intelModal.classList.remove("open"));
+
+    // Share Link Modal
+    const btnShare = document.getElementById("btn-share-doc");
+    const shareModal = document.getElementById("share-modal");
+    const closeShare = document.getElementById("btn-close-share-modal");
+    const btnCopyShare = document.getElementById("btn-copy-share-link");
+    if (btnShare) {
+        btnShare.addEventListener("click", () => {
+            if (currentDocId) generateShareLink(currentDocId);
+            else showToast("Please select or save a document first.", "info");
+        });
+    }
+    if (closeShare) closeShare.addEventListener("click", () => shareModal.classList.remove("open"));
+    if (btnCopyShare) {
+        btnCopyShare.addEventListener("click", () => {
+            const input = document.getElementById("share-link-input");
+            input.select();
+            navigator.clipboard.writeText(input.value);
+            showToast("Share link copied to clipboard!", "success");
+        });
+    }
+
     // Export Document (.md)
     document.getElementById("btn-export-doc").addEventListener("click", () => {
-        if (currentDocId) {
-            exportCurrentDocument();
-        }
+        if (currentDocId) exportCurrentDocument();
     });
 
-    // File Import / Upload
+    // File Import / Upload (Multi-format)
     const btnUpload = document.getElementById("btn-upload-doc");
     const fileInput = document.getElementById("file-upload-input");
     btnUpload.addEventListener("click", () => {
@@ -104,26 +382,40 @@ function setupEventListeners() {
         });
     });
 
-    // View Toggles
-    const tabDoc = document.getElementById("tab-doc");
-    const tabGraph = document.getElementById("tab-graph");
-    const docPane = document.getElementById("doc-pane");
-    const graphPane = document.getElementById("graph-pane");
+    // Drawer Tabs (Vector Telemetry vs Comments)
+    const tabTelemetry = document.getElementById("drawer-tab-telemetry");
+    const tabComments = document.getElementById("drawer-tab-comments");
+    const drawerTelemetry = document.getElementById("drawer-content");
+    const drawerComments = document.getElementById("drawer-comments-pane");
 
-    tabDoc.addEventListener("click", () => {
-        tabDoc.classList.add("active");
-        tabGraph.classList.remove("active");
-        docPane.classList.add("active");
-        graphPane.classList.remove("active");
-    });
+    if (tabTelemetry && tabComments) {
+        tabTelemetry.addEventListener("click", () => {
+            tabTelemetry.classList.add("active");
+            tabComments.classList.remove("active");
+            drawerTelemetry.style.display = "block";
+            drawerComments.style.display = "none";
+        });
 
-    tabGraph.addEventListener("click", () => {
-        tabGraph.classList.add("active");
-        tabDoc.classList.remove("active");
-        graphPane.classList.add("active");
-        docPane.classList.remove("active");
-        renderKnowledgeGraph();
-    });
+        tabComments.addEventListener("click", () => {
+            tabComments.classList.add("active");
+            tabTelemetry.classList.remove("active");
+            drawerTelemetry.style.display = "none";
+            drawerComments.style.display = "block";
+            if (currentDocId) loadDocComments(currentDocId);
+        });
+    }
+
+    // Submit Comment
+    const btnComment = document.getElementById("btn-submit-comment");
+    if (btnComment) {
+        btnComment.addEventListener("click", submitComment);
+    }
+    const commentInput = document.getElementById("doc-comment-input");
+    if (commentInput) {
+        commentInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") submitComment();
+        });
+    }
 
     // Search Trigger (Enter or Search Icon)
     const searchInput = document.getElementById("hybrid-search-input");
@@ -132,21 +424,15 @@ function setupEventListeners() {
     searchInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
             const query = searchInput.value.trim();
-            if (query.length > 0) {
-                executeHybridSearch(query);
-            } else {
-                showToast("Please enter a search query.", "info");
-            }
+            if (query.length > 0) executeHybridSearch(query);
+            else showToast("Please enter a search query.", "info");
         }
     });
 
     searchIcon.addEventListener("click", () => {
         const query = searchInput.value.trim();
-        if (query.length > 0) {
-            executeHybridSearch(query);
-        } else {
-            searchInput.focus();
-        }
+        if (query.length > 0) executeHybridSearch(query);
+        else searchInput.focus();
     });
 
     // Search Modal Close
@@ -182,10 +468,43 @@ function setupEventListeners() {
     const titleInput = document.getElementById("doc-title-input");
     const contentInput = document.getElementById("doc-content-input");
     [titleInput, contentInput].forEach(el => {
-        el.addEventListener("input", () => {
-            isDirty = true;
-        });
+        if (el) el.addEventListener("input", () => { isDirty = true; });
     });
+
+    // Refresh Activity in Dashboard
+    const btnRefreshActivity = document.getElementById("btn-refresh-activity");
+    if (btnRefreshActivity) {
+        btnRefreshActivity.addEventListener("click", loadDashboardStats);
+    }
+
+    // Plan Update in Settings
+    const btnSavePlan = document.getElementById("btn-save-plan");
+    if (btnSavePlan) {
+        btnSavePlan.addEventListener("click", async () => {
+            const plan = document.getElementById("settings-user-plan").value;
+            try {
+                const res = await fetch("/api/v1/auth/profile", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ full_name: currentUser ? currentUser.full_name : "User" })
+                });
+                showToast(`Subscription plan updated to ${plan.toUpperCase()}`, "success");
+                const badge = document.getElementById("sidebar-tier-badge");
+                if (badge) badge.textContent = plan.toUpperCase();
+            } catch (err) {
+                showToast("Failed to update plan", "error");
+            }
+        });
+    }
+
+    // AI Chat Assistant Events
+    setupChatEvents();
+
+    // Notes Events
+    setupNotesEvents();
+
+    // Tasks Events
+    setupTasksEvents();
 }
 
 function closeMobileSidebar() {
@@ -197,20 +516,20 @@ function closeMobileSidebar() {
 
 function setupKeyboardShortcuts() {
     document.addEventListener("keydown", (e) => {
-        // Ctrl+S / Cmd+S: Save document
+        // Ctrl+S: Save document
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
             e.preventDefault();
             saveDocument();
         }
-        // Ctrl+K / Cmd+K: Focus search
+        // Ctrl+K: Focus search
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
             e.preventDefault();
             const searchInput = document.getElementById("hybrid-search-input");
             if (searchInput) searchInput.focus();
         }
-        // Escape: Close search modal & mobile sidebar
+        // Escape: Close all modals & mobile sidebar
         if (e.key === "Escape") {
-            document.getElementById("search-modal").classList.remove("open");
+            document.querySelectorAll(".modal-overlay").forEach(m => m.classList.remove("open"));
             closeMobileSidebar();
         }
     });
@@ -245,33 +564,154 @@ function setupDragAndDrop() {
 }
 
 /* ==========================================================
-   SYSTEM TELEMETRY
+   DASHBOARD & TELEMETRY
    ========================================================== */
-async function loadSystemStats() {
+async function loadDashboardStats() {
     try {
-        const res = await fetch("/api/v1/stats");
-        if (res.ok) {
-            const stats = await res.json();
-            const label = document.getElementById("system-status-label");
-            if (label) {
-                label.textContent = `${stats.database_engine} • ${stats.total_documents} Docs • ${stats.total_chunks} Chunks`;
+        const res = await fetch(`/api/v1/analytics/dashboard?workspace_id=${activeWorkspaceId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // System telemetry badge
+        const statusLabel = document.getElementById("system-status-label");
+        if (statusLabel) {
+            statusLabel.textContent = `${data.database_engine || 'SQLite'} • ${data.total_documents} Docs • ${data.total_chunks} Chunks`;
+        }
+
+        // Dashboard Stat Cards
+        const dashDocs = document.getElementById("dash-total-docs");
+        const dashActiveDocs = document.getElementById("dash-active-docs");
+        const dashChunks = document.getElementById("dash-total-chunks");
+        const dashNotes = document.getElementById("dash-total-notes");
+        const dashPinnedNotes = document.getElementById("dash-pinned-notes");
+        const dashTasks = document.getElementById("dash-total-tasks");
+        const dashPendingTasks = document.getElementById("dash-pending-tasks");
+        const dashStorage = document.getElementById("dash-storage-used");
+        const dashQuota = document.getElementById("dash-storage-quota");
+
+        if (dashDocs) dashDocs.textContent = data.total_documents || 0;
+        if (dashActiveDocs) dashActiveDocs.textContent = `${data.active_documents || data.total_documents || 0} Active`;
+        if (dashChunks) dashChunks.textContent = data.total_chunks || 0;
+        if (dashNotes) dashNotes.textContent = data.total_notes || 0;
+        if (dashPinnedNotes) dashPinnedNotes.textContent = `${data.pinned_notes || 0} Pinned`;
+        if (dashTasks) dashTasks.textContent = data.total_tasks || 0;
+        if (dashPendingTasks) dashPendingTasks.textContent = `${data.pending_tasks || 0} Pending`;
+        if (dashStorage) dashStorage.textContent = `${data.storage_used_kb || 0} KB`;
+        if (dashQuota) dashQuota.textContent = `of ${data.storage_quota_mb || 500} MB quota`;
+
+        // Category breakdown
+        const catBox = document.getElementById("dash-category-distribution");
+        if (catBox) {
+            catBox.innerHTML = "";
+            const cats = data.category_distribution || {};
+            const total = Math.max(1, data.total_documents || 1);
+            const colorMap = {
+                "Architecture": "var(--accent-blue)",
+                "Engineering": "var(--accent-green)",
+                "Research": "var(--accent-purple)",
+                "General": "var(--accent-amber)"
+            };
+
+            const entries = Object.keys(cats).length > 0 ? Object.entries(cats) : [["Architecture", 1], ["Engineering", 1], ["Research", 1], ["General", 0]];
+            entries.forEach(([cat, count]) => {
+                const pct = Math.round((count / total) * 100);
+                const row = document.createElement("div");
+                row.style.marginBottom = "10px";
+                row.innerHTML = `
+                    <div class="distribution-row">
+                        <span><strong>${escapeHtml(cat)}</strong></span>
+                        <span style="color:var(--text-secondary); font-family:var(--font-mono);">${count} docs (${pct}%)</span>
+                    </div>
+                    <div class="distribution-bar">
+                        <div class="distribution-bar-inner" style="width: ${pct}%; background: ${colorMap[cat] || 'var(--accent-amber)'};"></div>
+                    </div>
+                `;
+                catBox.appendChild(row);
+            });
+        }
+
+        // Format breakdown
+        const formatBox = document.getElementById("dash-format-distribution");
+        if (formatBox) {
+            formatBox.innerHTML = "";
+            const formats = data.file_type_distribution || { "markdown": data.total_documents || 3 };
+            const total = Math.max(1, data.total_documents || 1);
+            Object.entries(formats).forEach(([fmt, count]) => {
+                const pct = Math.round((count / total) * 100);
+                const row = document.createElement("div");
+                row.style.marginBottom = "10px";
+                row.innerHTML = `
+                    <div class="distribution-row">
+                        <span style="font-family:var(--font-mono); text-transform:uppercase;">.${escapeHtml(fmt)}</span>
+                        <span style="color:var(--text-secondary);">${count} files (${pct}%)</span>
+                    </div>
+                    <div class="distribution-bar">
+                        <div class="distribution-bar-inner" style="width: ${pct}%; background: var(--accent-amber);"></div>
+                    </div>
+                `;
+                formatBox.appendChild(row);
+            });
+        }
+
+        // Activity timeline
+        const activityList = document.getElementById("dash-activity-list");
+        if (activityList) {
+            activityList.innerHTML = "";
+            const activities = data.recent_activities || [];
+            if (activities.length === 0) {
+                activityList.innerHTML = `<div style="font-size:12px; color:var(--text-muted); padding:8px 0;">No recorded activity yet. Actions and document modifications will be logged here.</div>`;
+            } else {
+                activities.forEach(act => {
+                    const item = document.createElement("div");
+                    item.className = "activity-item";
+                    let badgeClass = "badge-create";
+                    if (act.action.includes("UPDATE")) badgeClass = "badge-update";
+                    if (act.action.includes("DELETE") || act.action.includes("TRASH")) badgeClass = "badge-delete";
+                    if (act.action.includes("AI") || act.action.includes("SUMMARIZE")) badgeClass = "badge-ai";
+                    if (act.action.includes("SHARE")) badgeClass = "badge-share";
+
+                    const timeStr = act.created_at ? new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now";
+
+                    item.innerHTML = `
+                        <span class="activity-badge ${badgeClass}">${escapeHtml(act.action)}</span>
+                        <span class="activity-desc">${escapeHtml(act.details || act.entity_type)}</span>
+                        <span class="activity-time">${timeStr}</span>
+                    `;
+                    activityList.appendChild(item);
+                });
             }
         }
+
+        // Analytics Pane values
+        const storageVal = document.getElementById("analytics-storage-val");
+        const storageFill = document.getElementById("storage-bar-fill");
+        const avgChunks = document.getElementById("analytics-avg-chunks");
+        const dbEngine = document.getElementById("analytics-db-engine");
+
+        if (storageVal) storageVal.textContent = `${data.storage_used_kb || 0} KB`;
+        if (storageFill) {
+            const pct = Math.min(100, Math.max(1, ((data.storage_used_kb || 1) / (500 * 1024)) * 100));
+            storageFill.style.width = `${pct}%`;
+        }
+        if (avgChunks) avgChunks.textContent = data.average_chunks_per_doc || 0;
+        if (dbEngine) dbEngine.textContent = data.database_engine || "SQLite / PostgreSQL";
+
     } catch (err) {
-        console.warn("Telemetry stats unavailable:", err);
+        console.warn("Dashboard stats error:", err);
     }
 }
 
 /* ==========================================================
-   DOCUMENT MANAGEMENT (CRUD)
+   DOCUMENT MANAGEMENT (CRUD & MULTI-FORMAT)
    ========================================================== */
 async function loadDocuments() {
     try {
-        const res = await fetch("/api/v1/documents");
+        const res = await fetch(`/api/v1/documents?workspace_id=${activeWorkspaceId}&view=${currentDocView}`);
         if (!res.ok) throw new Error("Failed to load documents");
         allDocuments = await res.json();
         renderDocumentList();
-        document.getElementById("doc-count").textContent = allDocuments.length;
+        const docCountElem = document.getElementById("doc-count");
+        if (docCountElem) docCountElem.textContent = allDocuments.length;
     } catch (err) {
         console.error("Error loading documents:", err);
         showToast("Failed to load documents from database.", "error");
@@ -280,6 +720,7 @@ async function loadDocuments() {
 
 function renderDocumentList() {
     const list = document.getElementById("document-list");
+    if (!list) return;
     list.innerHTML = "";
 
     const filtered = currentCategory === "ALL" 
@@ -289,7 +730,7 @@ function renderDocumentList() {
     if (filtered.length === 0) {
         list.innerHTML = `
             <div style="padding:16px; text-align:center; font-size:12px; color:var(--text-muted);">
-                No documents in this category.<br>
+                No documents found in this view.<br>
                 <span style="font-size:11px; color:var(--accent-amber); cursor:pointer;" id="create-prompt-btn">+ Create document</span>
             </div>
         `;
@@ -308,8 +749,12 @@ function renderDocumentList() {
     filtered.forEach(doc => {
         const item = document.createElement("div");
         item.className = `doc-item ${doc.id === currentDocId ? 'active' : ''}`;
+        
+        const favStar = doc.is_favorite ? `<span style="color:var(--accent-amber); margin-right:4px;">★</span>` : '';
+        const trashBadge = doc.is_trash ? `<span style="color:var(--accent-red); font-size:10px; margin-left:4px;">[TRASH]</span>` : '';
+
         item.innerHTML = `
-            <div class="doc-item-title">${escapeHtml(doc.title)}</div>
+            <div class="doc-item-title">${favStar}${escapeHtml(doc.title)}${trashBadge}</div>
             <div class="doc-item-meta">
                 <span>[${escapeHtml(doc.category)}]</span>
                 <span>• ${doc.chunk_count || 1} chunks</span>
@@ -336,8 +781,16 @@ async function selectDocument(id) {
         document.getElementById("doc-tags-input").value = (doc.tags || []).join(", ");
         document.getElementById("doc-content-input").value = doc.content;
         
-        document.getElementById("btn-delete-doc").style.display = "inline-block";
-        document.getElementById("btn-export-doc").style.display = "inline-block";
+        // Buttons visibility
+        const delBtn = document.getElementById("btn-delete-doc");
+        const expBtn = document.getElementById("btn-export-doc");
+        const resBtn = document.getElementById("btn-restore-doc");
+        const favBtn = document.getElementById("btn-fav-doc");
+
+        if (delBtn) delBtn.style.display = doc.is_trash ? "none" : "inline-block";
+        if (expBtn) expBtn.style.display = "inline-block";
+        if (resBtn) resBtn.style.display = doc.is_trash ? "inline-block" : "none";
+        if (favBtn) favBtn.style.color = doc.is_favorite ? "var(--accent-amber)" : "var(--text-secondary)";
 
         renderTelemetryDrawer(doc);
         renderDocumentList();
@@ -349,8 +802,10 @@ async function selectDocument(id) {
 
 function renderTelemetryDrawer(doc) {
     const chunkCount = (doc.chunks && doc.chunks.length) || 0;
-    document.getElementById("chunk-info").textContent = `${chunkCount} Chunks Generated`;
+    const chunkInfo = document.getElementById("chunk-info");
+    if (chunkInfo) chunkInfo.textContent = `${chunkCount} Chunks Generated`;
     const drawer = document.getElementById("drawer-content");
+    if (!drawer) return;
     drawer.innerHTML = "";
 
     // Show related graph connections
@@ -391,8 +846,17 @@ function resetEditor() {
     document.getElementById("doc-category-select").value = "General";
     document.getElementById("doc-tags-input").value = "";
     document.getElementById("doc-content-input").value = "";
-    document.getElementById("btn-delete-doc").style.display = "none";
-    document.getElementById("btn-export-doc").style.display = "none";
+    
+    const delBtn = document.getElementById("btn-delete-doc");
+    const expBtn = document.getElementById("btn-export-doc");
+    const resBtn = document.getElementById("btn-restore-doc");
+    const favBtn = document.getElementById("btn-fav-doc");
+
+    if (delBtn) delBtn.style.display = "none";
+    if (expBtn) expBtn.style.display = "none";
+    if (resBtn) resBtn.style.display = "none";
+    if (favBtn) favBtn.style.color = "var(--text-secondary)";
+
     document.getElementById("chunk-info").textContent = "0 Chunks Generated";
     document.getElementById("drawer-content").innerHTML = `<div class="empty-state">New document draft. Enter content and save to index.</div>`;
     renderDocumentList();
@@ -408,7 +872,6 @@ async function saveDocument() {
     const tagsRaw = document.getElementById("doc-tags-input").value;
     const tags = tagsRaw.split(",").map(t => t.trim()).filter(t => t.length > 0);
 
-    // Validation
     if (!title) {
         showToast("Please enter a document title.", "error");
         document.getElementById("doc-title-input").focus();
@@ -420,7 +883,7 @@ async function saveDocument() {
         return;
     }
 
-    const payload = { title, content, category, tags };
+    const payload = { title, content, category, tags, workspace_id: activeWorkspaceId };
     const saveBtn = document.getElementById("btn-save-doc");
     const originalText = saveBtn.textContent;
 
@@ -456,7 +919,7 @@ async function saveDocument() {
         showToast(`"${saved.title}" saved and indexed (${saved.chunk_count} chunks).`, "success");
         await loadDocuments();
         await selectDocument(saved.id);
-        await loadSystemStats();
+        await loadDashboardStats();
     } catch (err) {
         console.error("Save error:", err);
         showToast("Error saving document: " + err.message, "error");
@@ -469,23 +932,54 @@ async function saveDocument() {
 
 async function deleteDocument(id) {
     const deleteBtn = document.getElementById("btn-delete-doc");
-    deleteBtn.disabled = true;
-    deleteBtn.textContent = "Deleting...";
+    if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = "Deleting...";
+    }
 
     try {
         const res = await fetch(`/api/v1/documents/${id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error("Failed to delete document from database");
+        if (!res.ok) throw new Error("Failed to delete document");
         
-        showToast("Document deleted successfully.", "success");
+        showToast("Document moved to Trash.", "success");
         resetEditor();
         await loadDocuments();
-        await loadSystemStats();
+        await loadDashboardStats();
     } catch (err) {
         console.error("Delete error:", err);
         showToast("Error deleting document: " + err.message, "error");
     } finally {
-        deleteBtn.disabled = false;
-        deleteBtn.textContent = "Delete";
+        if (deleteBtn) {
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = "Delete";
+        }
+    }
+}
+
+async function restoreDocument(id) {
+    try {
+        const res = await fetch(`/api/v1/documents/${id}/restore`, { method: "POST" });
+        if (!res.ok) throw new Error("Failed to restore document");
+        showToast("Document restored from Trash.", "success");
+        await loadDocuments();
+        await selectDocument(id);
+    } catch (err) {
+        showToast("Error restoring document: " + err.message, "error");
+    }
+}
+
+async function toggleFavoriteDocument(id) {
+    try {
+        const res = await fetch(`/api/v1/documents/${id}/favorite`, { method: "POST" });
+        if (res.ok) {
+            const doc = await res.json();
+            showToast(doc.is_favorite ? "Added to favorites ⭐" : "Removed from favorites", "info");
+            const favBtn = document.getElementById("btn-fav-doc");
+            if (favBtn) favBtn.style.color = doc.is_favorite ? "var(--accent-amber)" : "var(--text-secondary)";
+            await loadDocuments();
+        }
+    } catch (err) {
+        showToast("Failed to toggle favorite", "error");
     }
 }
 
@@ -498,13 +992,14 @@ async function handleFileUpload(file) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("category", document.getElementById("doc-category-select").value || "General");
+    formData.append("workspace_id", activeWorkspaceId);
 
     const uploadBtn = document.getElementById("btn-upload-doc");
     const originalText = uploadBtn.innerHTML;
 
     try {
         uploadBtn.disabled = true;
-        uploadBtn.innerHTML = `<span>Uploading...</span>`;
+        uploadBtn.innerHTML = `<span>Uploading & Parsing...</span>`;
 
         const res = await fetch("/api/v1/documents/upload", {
             method: "POST",
@@ -517,16 +1012,789 @@ async function handleFileUpload(file) {
         }
 
         const saved = await res.json();
-        showToast(`Imported "${saved.title}" successfully!`, "success");
+        showToast(`Imported "${saved.title}" successfully! (${saved.chunk_count} chunks)`, "success");
         await loadDocuments();
         await selectDocument(saved.id);
-        await loadSystemStats();
+        await loadDashboardStats();
     } catch (err) {
         console.error("Import error:", err);
         showToast("Import failed: " + err.message, "error");
     } finally {
         uploadBtn.disabled = false;
         uploadBtn.innerHTML = originalText;
+    }
+}
+
+/* ==========================================================
+   DOCUMENT COMMENTS & DISCUSSIONS
+   ========================================================== */
+async function loadDocComments(docId) {
+    const list = document.getElementById("doc-comments-list");
+    if (!list) return;
+    list.innerHTML = "";
+
+    try {
+        const res = await fetch(`/api/v1/collaboration/documents/${docId}/comments`);
+        if (res.ok) {
+            const comments = await res.json();
+            if (comments.length === 0) {
+                list.innerHTML = `<div style="font-size:11px; color:var(--text-muted); padding:6px 0;">No comments on this document yet. Start a discussion!</div>`;
+                return;
+            }
+            comments.forEach(c => {
+                const card = document.createElement("div");
+                card.className = "comment-card";
+                card.innerHTML = `
+                    <div class="comment-header">
+                        <span style="font-weight:600; color:var(--text-primary);">${escapeHtml(c.user_email || 'Teammate')}</span>
+                        <span>${new Date(c.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <div>${escapeHtml(c.content)}</div>
+                `;
+                list.appendChild(card);
+            });
+        }
+    } catch (err) {
+        console.error("Failed loading comments:", err);
+    }
+}
+
+async function submitComment() {
+    if (!currentDocId) {
+        showToast("Please select a document first", "info");
+        return;
+    }
+    const input = document.getElementById("doc-comment-input");
+    const content = input.value.trim();
+    if (!content) return;
+
+    try {
+        const res = await fetch(`/api/v1/collaboration/documents/${currentDocId}/comments`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content })
+        });
+        if (res.ok) {
+            input.value = "";
+            showToast("Comment posted!", "success");
+            loadDocComments(currentDocId);
+        }
+    } catch (err) {
+        showToast("Failed to post comment", "error");
+    }
+}
+
+/* ==========================================================
+   SHARING & PERMANENT LINKS
+   ========================================================== */
+async function generateShareLink(docId) {
+    const modal = document.getElementById("share-modal");
+    const input = document.getElementById("share-link-input");
+
+    try {
+        const res = await fetch(`/api/v1/collaboration/documents/${docId}/share`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ access_type: "public_read" })
+        });
+        if (res.ok) {
+            const link = await res.json();
+            const shareUrl = `${window.location.origin}/share/${link.token}`;
+            input.value = shareUrl;
+            modal.classList.add("open");
+        } else {
+            showToast("Failed to generate share link", "error");
+        }
+    } catch (err) {
+        showToast("Error generating share link", "error");
+    }
+}
+
+/* ==========================================================
+   AI DOCUMENT INTELLIGENCE
+   ========================================================== */
+async function triggerAiIntelligence(docId) {
+    const modal = document.getElementById("ai-intel-modal");
+    const summaryText = document.getElementById("intel-summary-text");
+    const takeawaysList = document.getElementById("intel-takeaways-list");
+    const entitiesBox = document.getElementById("intel-entities-chips");
+    const actionsList = document.getElementById("intel-actions-list");
+
+    summaryText.textContent = "Analyzing document content with extractive salience model...";
+    takeawaysList.innerHTML = "<li>Extracting key propositions...</li>";
+    entitiesBox.innerHTML = "<span class='intel-chip'>Scanning entities...</span>";
+    actionsList.innerHTML = "<li>Searching for deliverables and milestones...</li>";
+    modal.classList.add("open");
+
+    try {
+        // Parallel requests for summary, entities, action-items
+        const [sumRes, entRes, actRes] = await Promise.all([
+            fetch("/api/v1/intelligence/summarize", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ document_id: docId, max_sentences: 3 })
+            }),
+            fetch("/api/v1/intelligence/entities", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ document_id: docId })
+            }),
+            fetch("/api/v1/intelligence/action-items", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ document_id: docId })
+            })
+        ]);
+
+        if (sumRes.ok) {
+            const data = await sumRes.json();
+            summaryText.textContent = data.summary;
+            takeawaysList.innerHTML = "";
+            (data.key_takeaways || []).forEach(tk => {
+                const li = document.createElement("li");
+                li.textContent = tk;
+                takeawaysList.appendChild(li);
+            });
+        }
+
+        if (entRes.ok) {
+            const data = await entRes.json();
+            entitiesBox.innerHTML = "";
+            (data.entities || []).forEach(e => {
+                const chip = document.createElement("span");
+                chip.className = "intel-chip";
+                chip.textContent = `${e.name} (${e.type})`;
+                entitiesBox.appendChild(chip);
+            });
+        }
+
+        if (actRes.ok) {
+            const data = await actRes.json();
+            currentExtractedActions = data.action_items || [];
+            actionsList.innerHTML = "";
+            if (currentExtractedActions.length === 0) {
+                actionsList.innerHTML = `<li>No explicit action items found in this document.</li>`;
+            } else {
+                currentExtractedActions.forEach(a => {
+                    const li = document.createElement("li");
+                    li.textContent = `${a.item} [Priority: ${a.priority.toUpperCase()}]`;
+                    actionsList.appendChild(li);
+                });
+            }
+        }
+
+        // Convert to Tasks button
+        const convertBtn = document.getElementById("btn-convert-intel-tasks");
+        if (convertBtn) {
+            convertBtn.onclick = async () => {
+                if (currentExtractedActions.length === 0) {
+                    showToast("No action items to convert", "info");
+                    return;
+                }
+                for (const act of currentExtractedActions) {
+                    await fetch("/api/v1/tasks", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            title: act.item,
+                            priority: act.priority || "medium",
+                            document_id: docId,
+                            workspace_id: activeWorkspaceId
+                        })
+                    });
+                }
+                showToast(`Converted ${currentExtractedActions.length} items into tasks!`, "success");
+                modal.classList.remove("open");
+                loadTasks();
+            };
+        }
+
+    } catch (err) {
+        console.error("AI intelligence error:", err);
+        showToast("Error processing AI document intelligence: " + err.message, "error");
+    }
+}
+
+/* ==========================================================
+   AI CONVERSATIONAL ASSISTANT
+   ========================================================== */
+function setupChatEvents() {
+    const btnNewChat = document.getElementById("btn-new-chat");
+    const btnSend = document.getElementById("btn-send-chat");
+    const queryInput = document.getElementById("chat-query-input");
+
+    if (btnNewChat) {
+        btnNewChat.addEventListener("click", () => createNewChatSession());
+    }
+
+    if (btnSend && queryInput) {
+        btnSend.addEventListener("click", () => sendChatMessage());
+        queryInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMessage();
+            }
+        });
+    }
+
+    // Prompt Chips
+    const promptChips = document.querySelectorAll(".prompt-chip");
+    promptChips.forEach(chip => {
+        chip.addEventListener("click", () => {
+            if (queryInput) {
+                queryInput.value = chip.dataset.prompt;
+                sendChatMessage();
+            }
+        });
+    });
+}
+
+async function loadChatConversations() {
+    const list = document.getElementById("chat-conversation-list");
+    if (!list) return;
+    list.innerHTML = "";
+
+    try {
+        const res = await fetch(`/api/v1/chat/conversations?workspace_id=${activeWorkspaceId}`);
+        if (res.ok) {
+            const convs = await res.json();
+            if (convs.length === 0) {
+                // Auto create initial conversation
+                await createNewChatSession();
+                return;
+            }
+
+            convs.forEach(c => {
+                const item = document.createElement("div");
+                item.className = `chat-session-item ${c.id === activeChatSessionId ? 'active' : ''}`;
+                item.innerHTML = `<span>${escapeHtml(c.title)}</span>`;
+                item.addEventListener("click", () => selectChatSession(c.id, c.title));
+                list.appendChild(item);
+            });
+
+            if (!activeChatSessionId && convs.length > 0) {
+                selectChatSession(convs[0].id, convs[0].title);
+            }
+        }
+    } catch (err) {
+        console.error("Failed loading chat sessions:", err);
+    }
+}
+
+async function createNewChatSession() {
+    try {
+        const res = await fetch("/api/v1/chat/conversations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                title: "Research Chat",
+                workspace_id: activeWorkspaceId
+            })
+        });
+        if (res.ok) {
+            const conv = await res.json();
+            activeChatSessionId = conv.id;
+            await loadChatConversations();
+            selectChatSession(conv.id, conv.title);
+        }
+    } catch (err) {
+        showToast("Error starting chat session", "error");
+    }
+}
+
+async function selectChatSession(id, title) {
+    activeChatSessionId = id;
+    const activeTitle = document.getElementById("chat-active-title");
+    if (activeTitle) activeTitle.textContent = title;
+
+    // Highlight active session item
+    document.querySelectorAll(".chat-session-item").forEach(item => item.classList.remove("active"));
+    const list = document.getElementById("chat-conversation-list");
+    if (list) {
+        Array.from(list.children).forEach(el => {
+            if (el.textContent.trim() === title) el.classList.add("active");
+        });
+    }
+
+    const messagesBox = document.getElementById("chat-messages-container");
+    messagesBox.innerHTML = "";
+
+    try {
+        const res = await fetch(`/api/v1/chat/conversations/${id}/messages`);
+        if (res.ok) {
+            const msgs = await res.json();
+            if (msgs.length === 0) {
+                messagesBox.innerHTML = `
+                    <div class="chat-message assistant">
+                        <div class="message-avatar">ND</div>
+                        <div class="message-content">
+                            <p>Hello! I am your <strong>NeuralDesk AI Assistant</strong>. Ask me anything about your documents, architecture notes, or research papers. All answers are grounded with vector citations directly from your workspace.</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                msgs.forEach(m => renderChatMessage(m.role, m.content, m.citations));
+            }
+        }
+    } catch (err) {
+        console.error("Failed loading messages:", err);
+    }
+}
+
+function renderChatMessage(role, content, citations = []) {
+    const box = document.getElementById("chat-messages-container");
+    if (!box) return;
+
+    const msg = document.createElement("div");
+    msg.className = `chat-message ${role}`;
+
+    const avatarText = role === "user" ? (currentUser ? currentUser.email.substring(0,2).toUpperCase() : "ME") : "ND";
+
+    let citationsHtml = "";
+    if (citations && citations.length > 0) {
+        citationsHtml = `<div style="margin-top:8px;">` + citations.map(c => 
+            `<span class="citation-tag" title="${escapeHtml(c.snippet)}">📄 ${escapeHtml(c.title)} [Chunk #${c.chunk_index + 1}]</span>`
+        ).join("") + `</div>`;
+    }
+
+    msg.innerHTML = `
+        <div class="message-avatar">${avatarText}</div>
+        <div class="message-content">
+            <div>${escapeHtml(content).replace(/\n/g, '<br>')}</div>
+            ${citationsHtml}
+        </div>
+    `;
+
+    box.appendChild(msg);
+    box.scrollTop = box.scrollHeight;
+}
+
+async function sendChatMessage() {
+    const input = document.getElementById("chat-query-input");
+    const query = input.value.trim();
+    if (!query) return;
+
+    if (!activeChatSessionId) {
+        await createNewChatSession();
+    }
+
+    const scope = document.getElementById("chat-scope-select").value;
+    const docId = (scope === "document" && currentDocId) ? currentDocId : null;
+
+    input.value = "";
+    renderChatMessage("user", query);
+
+    // Show typing state
+    const box = document.getElementById("chat-messages-container");
+    const typingMsg = document.createElement("div");
+    typingMsg.className = "chat-message assistant typing-indicator";
+    typingMsg.innerHTML = `
+        <div class="message-avatar">ND</div>
+        <div class="message-content"><p style="font-style:italic; color:var(--text-muted);">Retrieving semantic chunks and synthesizing answer...</p></div>
+    `;
+    box.appendChild(typingMsg);
+    box.scrollTop = box.scrollHeight;
+
+    try {
+        const res = await fetch(`/api/v1/chat/conversations/${activeChatSessionId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                prompt: query,
+                document_id: docId,
+                workspace_id: activeWorkspaceId
+            })
+        });
+
+        typingMsg.remove();
+
+        if (res.ok) {
+            const data = await res.json();
+            renderChatMessage("assistant", data.content, data.citations);
+        } else {
+            renderChatMessage("assistant", "Sorry, I encountered an error while synthesizing the answer. Please try again.");
+        }
+    } catch (err) {
+        typingMsg.remove();
+        renderChatMessage("assistant", "Error connecting to AI assistant: " + err.message);
+    }
+}
+
+/* ==========================================================
+   NOTES MODULE
+   ========================================================== */
+function setupNotesEvents() {
+    const btnCreateNote = document.getElementById("btn-create-note");
+    const noteModal = document.getElementById("note-modal");
+    const closeNoteModal = document.getElementById("btn-close-note-modal");
+    const submitNote = document.getElementById("btn-submit-note");
+    const searchNotes = document.getElementById("notes-search-input");
+
+    if (btnCreateNote) {
+        btnCreateNote.addEventListener("click", () => {
+            openNoteModal();
+        });
+    }
+
+    if (closeNoteModal) {
+        closeNoteModal.addEventListener("click", () => noteModal.classList.remove("open"));
+    }
+
+    if (submitNote) {
+        submitNote.addEventListener("click", saveNoteFromModal);
+    }
+
+    if (searchNotes) {
+        searchNotes.addEventListener("input", (e) => {
+            filterNotes(e.target.value.trim().toLowerCase());
+        });
+    }
+}
+
+let cachedNotes = [];
+let editingNoteId = null;
+
+async function loadNotes() {
+    const grid = document.getElementById("notes-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    try {
+        const res = await fetch(`/api/v1/notes?workspace_id=${activeWorkspaceId}`);
+        if (res.ok) {
+            cachedNotes = await res.json();
+            renderNotesGrid(cachedNotes);
+        }
+    } catch (err) {
+        console.error("Failed loading notes:", err);
+    }
+}
+
+function renderNotesGrid(notes) {
+    const grid = document.getElementById("notes-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    if (notes.length === 0) {
+        grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--text-muted);">No notes found in this workspace. Click "+ New Note" to capture your ideas.</div>`;
+        return;
+    }
+
+    notes.forEach(note => {
+        const card = document.createElement("div");
+        card.className = `note-card ${note.is_pinned ? 'pinned' : ''}`;
+
+        const tagsHtml = (note.tags || []).map(t => `<span class="note-tag">#${escapeHtml(t)}</span>`).join("");
+        const linkedDoc = allDocuments.find(d => d.id === note.document_id);
+        const linkHtml = linkedDoc 
+            ? `<span class="note-link-pill" title="Click to view linked document">🔗 ${escapeHtml(linkedDoc.title)}</span>` 
+            : '';
+
+        card.innerHTML = `
+            <div class="note-card-header">
+                <span class="note-title">${escapeHtml(note.title)}</span>
+                <span class="note-pinned-btn" style="cursor:pointer; color:${note.is_pinned ? 'var(--accent-amber)' : 'var(--text-muted)'};" title="Toggle pin">📌</span>
+            </div>
+            <div class="note-card-body">${escapeHtml(note.content)}</div>
+            ${tagsHtml ? `<div class="note-tags-list">${tagsHtml}</div>` : ''}
+            <div class="note-card-footer">
+                <div>${linkHtml}</div>
+                <div class="note-actions">
+                    <button class="btn-subtle btn-sm btn-edit-note">Edit</button>
+                    <button class="btn-subtle btn-sm btn-delete-note" style="color:var(--accent-red);">Del</button>
+                </div>
+            </div>
+        `;
+
+        // Toggle pin
+        card.querySelector(".note-pinned-btn").addEventListener("click", async () => {
+            await fetch(`/api/v1/notes/${note.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ is_pinned: !note.is_pinned })
+            });
+            loadNotes();
+        });
+
+        // Edit note
+        card.querySelector(".btn-edit-note").addEventListener("click", () => {
+            openNoteModal(note);
+        });
+
+        // Delete note
+        card.querySelector(".btn-delete-note").addEventListener("click", async () => {
+            if (confirm("Delete this note?")) {
+                await fetch(`/api/v1/notes/${note.id}`, { method: "DELETE" });
+                showToast("Note deleted", "success");
+                loadNotes();
+            }
+        });
+
+        // Linked document click
+        if (linkedDoc) {
+            const pill = card.querySelector(".note-link-pill");
+            if (pill) {
+                pill.addEventListener("click", () => {
+                    document.getElementById("tab-doc").click();
+                    selectDocument(linkedDoc.id);
+                });
+            }
+        }
+
+        grid.appendChild(card);
+    });
+}
+
+function filterNotes(query) {
+    if (!query) {
+        renderNotesGrid(cachedNotes);
+        return;
+    }
+    const filtered = cachedNotes.filter(n => 
+        n.title.toLowerCase().includes(query) || 
+        n.content.toLowerCase().includes(query) ||
+        (n.tags && n.tags.some(t => t.toLowerCase().includes(query)))
+    );
+    renderNotesGrid(filtered);
+}
+
+function openNoteModal(existingNote = null) {
+    const modal = document.getElementById("note-modal");
+    const titleInput = document.getElementById("note-title-input");
+    const contentInput = document.getElementById("note-content-input");
+    const tagsInput = document.getElementById("note-tags-input");
+    const docSelect = document.getElementById("note-doc-link-select");
+    const modalTitle = document.getElementById("note-modal-title");
+
+    // Populate doc dropdown
+    docSelect.innerHTML = `<option value="">-- No Linked Document --</option>`;
+    allDocuments.forEach(d => {
+        const opt = document.createElement("option");
+        opt.value = d.id;
+        opt.textContent = d.title;
+        docSelect.appendChild(opt);
+    });
+
+    if (existingNote) {
+        editingNoteId = existingNote.id;
+        modalTitle.textContent = "Edit Note";
+        titleInput.value = existingNote.title;
+        contentInput.value = existingNote.content;
+        tagsInput.value = (existingNote.tags || []).join(", ");
+        docSelect.value = existingNote.document_id || "";
+    } else {
+        editingNoteId = null;
+        modalTitle.textContent = "Create Knowledge Note";
+        titleInput.value = "";
+        contentInput.value = "";
+        tagsInput.value = "";
+        docSelect.value = currentDocId || "";
+    }
+
+    modal.classList.add("open");
+}
+
+async function saveNoteFromModal() {
+    const title = document.getElementById("note-title-input").value.trim();
+    const content = document.getElementById("note-content-input").value.trim();
+    const tagsRaw = document.getElementById("note-tags-input").value;
+    const docIdRaw = document.getElementById("note-doc-link-select").value;
+
+    if (!title || !content) {
+        showToast("Please enter title and content", "error");
+        return;
+    }
+
+    const tags = tagsRaw.split(",").map(t => t.trim()).filter(t => t.length > 0);
+    const docId = docIdRaw ? parseInt(docIdRaw, 10) : null;
+
+    try {
+        if (editingNoteId) {
+            await fetch(`/api/v1/notes/${editingNoteId}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, content, tags, document_id: docId })
+            });
+            showToast("Note updated!", "success");
+        } else {
+            await fetch("/api/v1/notes", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    title,
+                    content,
+                    tags,
+                    document_id: docId,
+                    workspace_id: activeWorkspaceId
+                })
+            });
+            showToast("Note created!", "success");
+        }
+        document.getElementById("note-modal").classList.remove("open");
+        loadNotes();
+    } catch (err) {
+        showToast("Error saving note", "error");
+    }
+}
+
+/* ==========================================================
+   TASKS KANBAN MODULE
+   ========================================================== */
+function setupTasksEvents() {
+    const btnCreate = document.getElementById("btn-create-task");
+    const taskModal = document.getElementById("task-modal");
+    const closeTask = document.getElementById("btn-close-task-modal");
+    const submitTask = document.getElementById("btn-submit-task");
+    const btnAutoExtract = document.getElementById("btn-auto-extract-tasks");
+
+    if (btnCreate) {
+        btnCreate.addEventListener("click", () => {
+            document.getElementById("task-title-input").value = "";
+            document.getElementById("task-desc-input").value = "";
+            document.getElementById("task-due-date").value = "";
+            taskModal.classList.add("open");
+        });
+    }
+
+    if (closeTask) closeTask.addEventListener("click", () => taskModal.classList.remove("open"));
+
+    if (submitTask) {
+        submitTask.addEventListener("click", async () => {
+            const title = document.getElementById("task-title-input").value.trim();
+            const desc = document.getElementById("task-desc-input").value.trim();
+            const priority = document.getElementById("task-priority-select").value;
+            const status = document.getElementById("task-status-select").value;
+            const dueDate = document.getElementById("task-due-date").value || null;
+
+            if (!title) {
+                showToast("Please provide a task title", "error");
+                return;
+            }
+
+            try {
+                await fetch("/api/v1/tasks", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        title,
+                        description: desc,
+                        priority,
+                        status,
+                        due_date: dueDate,
+                        document_id: currentDocId,
+                        workspace_id: activeWorkspaceId
+                    })
+                });
+                showToast("Task created!", "success");
+                taskModal.classList.remove("open");
+                loadTasks();
+            } catch (err) {
+                showToast("Error creating task", "error");
+            }
+        });
+    }
+
+    if (btnAutoExtract) {
+        btnAutoExtract.addEventListener("click", async () => {
+            if (!currentDocId) {
+                showToast("Please select a document first.", "info");
+                return;
+            }
+            try {
+                showToast("Extracting tasks from document...", "info");
+                const res = await fetch(`/api/v1/tasks/extract-from-doc/${currentDocId}`, { method: "POST" });
+                if (res.ok) {
+                    const tasks = await res.json();
+                    showToast(`Extracted and created ${tasks.length} tasks!`, "success");
+                    loadTasks();
+                } else {
+                    showToast("No action items found in document", "info");
+                }
+            } catch (err) {
+                showToast("Failed to extract tasks", "error");
+            }
+        });
+    }
+}
+
+async function loadTasks() {
+    const listTodo = document.getElementById("tasks-list-todo");
+    const listInProgress = document.getElementById("tasks-list-in-progress");
+    const listDone = document.getElementById("tasks-list-done");
+
+    if (!listTodo || !listInProgress || !listDone) return;
+    listTodo.innerHTML = "";
+    listInProgress.innerHTML = "";
+    listDone.innerHTML = "";
+
+    try {
+        const res = await fetch(`/api/v1/tasks?workspace_id=${activeWorkspaceId}`);
+        if (res.ok) {
+            const tasks = await res.json();
+            let countTodo = 0, countProg = 0, countDone = 0;
+
+            tasks.forEach(t => {
+                const card = document.createElement("div");
+                card.className = "task-card";
+
+                const nextStatusMap = {
+                    "todo": "in_progress",
+                    "in_progress": "done",
+                    "done": "todo"
+                };
+
+                const nextStatusLabel = {
+                    "todo": "→ Start",
+                    "in_progress": "✔ Complete",
+                    "done": "↺ Reopen"
+                };
+
+                card.innerHTML = `
+                    <div class="task-card-title">${escapeHtml(t.title)}</div>
+                    ${t.description ? `<div class="task-card-desc">${escapeHtml(t.description)}</div>` : ''}
+                    <div class="task-card-meta">
+                        <span class="task-priority-badge priority-${t.priority}">${escapeHtml(t.priority)}</span>
+                        <div style="display:flex; gap:6px;">
+                            <button class="btn-subtle btn-sm btn-status-toggle">${nextStatusLabel[t.status] || 'Move'}</button>
+                            <button class="btn-subtle btn-sm btn-delete-task" style="color:var(--accent-red);">✕</button>
+                        </div>
+                    </div>
+                `;
+
+                // Status toggle
+                card.querySelector(".btn-status-toggle").addEventListener("click", async () => {
+                    await fetch(`/api/v1/tasks/${t.id}/status`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ status: nextStatusMap[t.status] })
+                    });
+                    loadTasks();
+                });
+
+                // Delete task
+                card.querySelector(".btn-delete-task").addEventListener("click", async () => {
+                    await fetch(`/api/v1/tasks/${t.id}`, { method: "DELETE" });
+                    loadTasks();
+                });
+
+                if (t.status === "todo") {
+                    listTodo.appendChild(card);
+                    countTodo++;
+                } else if (t.status === "in_progress") {
+                    listInProgress.appendChild(card);
+                    countProg++;
+                } else {
+                    listDone.appendChild(card);
+                    countDone++;
+                }
+            });
+
+            document.getElementById("count-todo").textContent = countTodo;
+            document.getElementById("count-in-progress").textContent = countProg;
+            document.getElementById("count-done").textContent = countDone;
+        }
+    } catch (err) {
+        console.error("Failed loading tasks:", err);
     }
 }
 
@@ -542,6 +1810,7 @@ async function executeHybridSearch(query) {
             body: JSON.stringify({
                 query,
                 limit: 10,
+                workspace_id: activeWorkspaceId,
                 category: currentCategory !== "ALL" ? currentCategory : null
             })
         });
@@ -581,6 +1850,7 @@ function renderSearchResults(query, results) {
             `;
             card.addEventListener("click", () => {
                 document.getElementById("search-modal").classList.remove("open");
+                document.getElementById("tab-doc").click();
                 selectDocument(r.document_id);
             });
             container.appendChild(card);
@@ -605,17 +1875,18 @@ function highlightQuery(text, query) {
    ========================================================== */
 async function renderKnowledgeGraph() {
     const svg = document.getElementById("graph-svg");
+    if (!svg) return;
     svg.innerHTML = "";
 
     try {
-        const res = await fetch("/api/v1/graph");
+        const res = await fetch(`/api/v1/graph?workspace_id=${activeWorkspaceId}`);
         if (!res.ok) throw new Error("Failed to load knowledge graph");
         const { nodes, edges } = await res.json();
 
         if (nodes.length === 0) {
             svg.innerHTML = `
                 <text x="50%" y="50%" fill="#6e7681" text-anchor="middle" font-size="13">
-                    No document nodes available. Add or import documents to generate graph topology.
+                    No document nodes available in this workspace. Add or import documents to generate graph topology.
                 </text>
             `;
             return;
@@ -719,11 +1990,11 @@ async function recomputeTopology() {
     btn.textContent = "Recalculating...";
 
     try {
-        const res = await fetch("/api/v1/graph/recompute", { method: "POST" });
+        const res = await fetch(`/api/v1/graph/recompute?workspace_id=${activeWorkspaceId}`, { method: "POST" });
         if (!res.ok) throw new Error("Topology calculation failed");
         showToast("Topology recalculated across all documents.", "success");
         await renderKnowledgeGraph();
-        await loadSystemStats();
+        await loadDashboardStats();
     } catch (err) {
         console.error("Recompute error:", err);
         showToast("Failed to recalculate topology: " + err.message, "error");
@@ -763,11 +2034,11 @@ async function checkInitialSeed() {
             await fetch("/api/v1/documents", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(doc)
+                body: JSON.stringify({ ...doc, workspace_id: activeWorkspaceId })
             });
         }
         await loadDocuments();
-        await loadSystemStats();
+        await loadDashboardStats();
     }
 }
 

@@ -9,7 +9,6 @@ from app.config import DB_PATH, DATABASE_URL
 
 logger = logging.getLogger("neuraldesk.database")
 
-# PostgreSQL Connection Pool (lazy initialization)
 _pg_pool = None
 
 def is_postgres_configured() -> bool:
@@ -22,7 +21,6 @@ def _get_pg_pool():
         url = DATABASE_URL
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
-        # 1 to 10 connections for serverless concurrency
         _pg_pool = psycopg2.pool.ThreadedConnectionPool(minconn=1, maxconn=10, dsn=url)
     return _pg_pool
 
@@ -30,7 +28,7 @@ def adapt_query(query: str, is_postgres: bool = False) -> str:
     if not is_postgres:
         return query
 
-    # Adapt SQLite's INSERT OR REPLACE for graph_edges to ANSI/Postgres ON CONFLICT
+    # Adapt SQLite's INSERT OR REPLACE for graph_edges and shared_links
     if "INSERT OR REPLACE INTO graph_edges" in query:
         query = """INSERT INTO graph_edges (id, source_id, target_id, weight, relation_type)
 VALUES (?, ?, ?, ?, ?)
@@ -130,101 +128,266 @@ def get_raw_connection():
         return conn
 
 def init_db():
-    if is_postgres_configured():
-        conn = get_raw_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'General',
-                tags TEXT NOT NULL DEFAULT '[]',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS document_chunks (
-                id TEXT PRIMARY KEY,
-                document_id TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                embedding TEXT,
-                FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS graph_edges (
-                id TEXT PRIMARY KEY,
-                source_id TEXT NOT NULL,
-                target_id TEXT NOT NULL,
-                weight REAL NOT NULL,
-                relation_type TEXT NOT NULL,
-                FOREIGN KEY (source_id) REFERENCES documents (id) ON DELETE CASCADE,
-                FOREIGN KEY (target_id) REFERENCES documents (id) ON DELETE CASCADE
-            )
-        """)
-        # Indexes for fast retrieval
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_category ON documents (category)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents (updated_at DESC)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON document_chunks (document_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges (source_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges (target_id)")
-        conn.commit()
-        conn.close()
-    else:
-        Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH, timeout=20.0)
+    conn = get_raw_connection()
+    is_pg = is_postgres_configured()
+    cursor = conn.cursor()
+
+    if not is_pg:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:
             try:
                 conn.execute("PRAGMA journal_mode=DELETE")
-            except sqlite3.OperationalError:
+            except Exception:
                 pass
         conn.execute("PRAGMA foreign_keys = ON")
-        cursor = conn.cursor()
+
+    # 1. Users Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            plan TEXT NOT NULL DEFAULT 'pro',
+            avatar_url TEXT DEFAULT '',
+            preferences TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 2. Workspaces Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS workspaces (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            owner_id TEXT NOT NULL,
+            is_default INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 3. Workspace Members Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS workspace_members (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'editor',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 4. Documents Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            owner_id TEXT NOT NULL DEFAULT 'system',
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'General',
+            tags TEXT NOT NULL DEFAULT '[]',
+            file_type TEXT NOT NULL DEFAULT 'text',
+            file_size INTEGER DEFAULT 0,
+            is_favorite INTEGER DEFAULT 0,
+            is_archived INTEGER DEFAULT 0,
+            is_trash INTEGER DEFAULT 0,
+            folder TEXT DEFAULT '',
+            version INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Safe Schema Migrations for existing documents table
+    doc_columns = [
+        ("workspace_id", "TEXT NOT NULL DEFAULT 'default'"),
+        ("owner_id", "TEXT NOT NULL DEFAULT 'system'"),
+        ("file_type", "TEXT NOT NULL DEFAULT 'text'"),
+        ("file_size", "INTEGER DEFAULT 0"),
+        ("is_favorite", "INTEGER DEFAULT 0"),
+        ("is_archived", "INTEGER DEFAULT 0"),
+        ("is_trash", "INTEGER DEFAULT 0"),
+        ("folder", "TEXT DEFAULT ''"),
+        ("version", "INTEGER DEFAULT 1")
+    ]
+    for col_name, col_type in doc_columns:
+        try:
+            cursor.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except Exception:
+            # Column already exists
+            pass
+
+    # 5. Document Chunks Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_chunks (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            embedding TEXT,
+            FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
+        )
+    """)
+
+    # 6. Graph Edges Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            weight REAL NOT NULL,
+            relation_type TEXT NOT NULL,
+            FOREIGN KEY (source_id) REFERENCES documents (id) ON DELETE CASCADE,
+            FOREIGN KEY (target_id) REFERENCES documents (id) ON DELETE CASCADE
+        )
+    """)
+
+    # 7. AI Conversations Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ai_conversations (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            user_id TEXT NOT NULL DEFAULT 'system',
+            title TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 8. AI Messages Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ai_messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            citations TEXT DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (conversation_id) REFERENCES ai_conversations (id) ON DELETE CASCADE
+        )
+    """)
+
+    # 9. Notes Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            owner_id TEXT NOT NULL DEFAULT 'system',
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            tags TEXT NOT NULL DEFAULT '[]',
+            is_pinned INTEGER DEFAULT 0,
+            is_favorite INTEGER DEFAULT 0,
+            linked_document_id TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 10. Tasks Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            owner_id TEXT NOT NULL DEFAULT 'system',
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'todo',
+            priority TEXT NOT NULL DEFAULT 'medium',
+            due_date TEXT DEFAULT NULL,
+            linked_document_id TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 11. Comments Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS comments (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            user_id TEXT NOT NULL DEFAULT 'system',
+            author_name TEXT NOT NULL DEFAULT 'Team Member',
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
+        )
+    """)
+
+    # 12. Notifications Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL DEFAULT 'system',
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'info',
+            is_read INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 13. Activity Logs Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS activity_logs (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            user_id TEXT NOT NULL DEFAULT 'system',
+            action TEXT NOT NULL,
+            details TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 14. Shared Links Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shared_links (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            permission TEXT NOT NULL DEFAULT 'view',
+            expires_at TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
+        )
+    """)
+
+    # Performance Indexes
+    indexes = [
+        ("idx_documents_category", "documents (category)"),
+        ("idx_documents_workspace", "documents (workspace_id)"),
+        ("idx_documents_updated", "documents (updated_at DESC)"),
+        ("idx_chunks_doc_id", "document_chunks (document_id)"),
+        ("idx_graph_edges_source", "graph_edges (source_id)"),
+        ("idx_graph_edges_target", "graph_edges (target_id)"),
+        ("idx_notes_workspace", "notes (workspace_id)"),
+        ("idx_tasks_workspace", "tasks (workspace_id)"),
+        ("idx_ai_messages_conv", "ai_messages (conversation_id)"),
+        ("idx_activity_workspace", "activity_logs (workspace_id)")
+    ]
+    for idx_name, idx_def in indexes:
+        try:
+            cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}")
+        except Exception:
+            pass
+
+    # Seed Default Workspace if empty
+    cursor.execute("SELECT id FROM workspaces WHERE id = 'default'")
+    if not cursor.fetchone():
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'General',
-                tags TEXT NOT NULL DEFAULT '[]',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            INSERT INTO workspaces (id, name, description, owner_id, is_default)
+            VALUES ('default', 'Primary Workspace', 'Default neural knowledge base workspace', 'system', 1)
         """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS document_chunks (
-                id TEXT PRIMARY KEY,
-                document_id TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                embedding TEXT,
-                FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS graph_edges (
-                id TEXT PRIMARY KEY,
-                source_id TEXT NOT NULL,
-                target_id TEXT NOT NULL,
-                weight REAL NOT NULL,
-                relation_type TEXT NOT NULL,
-                FOREIGN KEY (source_id) REFERENCES documents (id) ON DELETE CASCADE,
-                FOREIGN KEY (target_id) REFERENCES documents (id) ON DELETE CASCADE
-            )
-        """)
-        # Indexes
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_category ON documents (category)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents (updated_at DESC)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON document_chunks (document_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges (source_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges (target_id)")
-        conn.commit()
-        conn.close()
+
+    conn.commit()
+    conn.close()
 
 @contextmanager
 def get_db_connection() -> Generator[Any, None, None]:
