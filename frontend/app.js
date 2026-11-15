@@ -168,6 +168,7 @@ function setupNavigationTabs() {
     const tabs = [
         { btn: "tab-dashboard", pane: "dashboard-pane", onActive: loadDashboardStats, label: "Dashboard", isMore: false },
         { btn: "tab-doc", pane: "doc-pane", onActive: null, label: "Documents", isMore: false },
+        { btn: "tab-storage", pane: "storage-pane", onActive: loadStorageData, label: "Cloud Storage", isMore: false },
         { btn: "tab-chat", pane: "chat-pane", onActive: loadChatConversations, label: "AI Assistant", isMore: false },
         { btn: "tab-graph", pane: "graph-pane", onActive: renderKnowledgeGraph, label: "Graph", isMore: true },
         { btn: "tab-notes", pane: "notes-pane", onActive: loadNotes, label: "Notes", isMore: true },
@@ -383,6 +384,20 @@ function setupEventListeners() {
         });
     }
 
+    // Document Versions Modal
+    const btnDocVersions = document.getElementById("btn-doc-versions");
+    const versionsModal = document.getElementById("version-history-modal");
+    const closeVersions = document.getElementById("btn-close-versions-modal");
+    const btnRunDiff = document.getElementById("btn-run-diff");
+    if (btnDocVersions) {
+        btnDocVersions.addEventListener("click", () => {
+            if (currentDocId) openDocumentVersionsModal(currentDocId);
+            else showToast("Please select or save a document first.", "info");
+        });
+    }
+    if (closeVersions) closeVersions.addEventListener("click", () => versionsModal.classList.remove("open"));
+    if (btnRunDiff) btnRunDiff.addEventListener("click", runVersionDiff);
+
     // AI Intelligence Modal
     const btnIntel = document.getElementById("btn-ai-intel");
     const intelModal = document.getElementById("ai-intel-modal");
@@ -514,6 +529,9 @@ function setupEventListeners() {
     document.getElementById("btn-refresh-graph").addEventListener("click", () => {
         recomputeTopology();
     });
+
+    // Cloud Storage Events
+    setupStorageEvents();
 
     // Mobile Sidebar Toggles
     const btnToggleSidebar = document.getElementById("btn-toggle-sidebar");
@@ -1863,25 +1881,24 @@ async function loadTasks() {
 }
 
 /* ==========================================================
-   HYBRID VECTOR & LEXICAL SEARCH
+   UNIFIED NEURAL & GLOBAL CROSS-RESOURCE SEARCH
    ========================================================== */
 async function executeHybridSearch(query) {
     try {
-        showToast(`Searching for "${query}"...`, "info", 1500);
-        const res = await fetch("/api/v1/search", {
+        showToast(`Searching across documents, files, notes & tasks...`, "info", 1500);
+        const res = await fetch("/api/v1/search/global", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 query,
-                limit: 10,
-                workspace_id: activeWorkspaceId,
-                category: currentCategory !== "ALL" ? currentCategory : null
+                limit: 15,
+                workspace_id: activeWorkspaceId
             })
         });
 
-        if (!res.ok) throw new Error("Search service failed to respond");
-        const results = await res.json();
-        renderSearchResults(query, results);
+        if (!res.ok) throw new Error("Global search service failed to respond");
+        const data = await res.json();
+        renderSearchResults(query, data.results || []);
     } catch (err) {
         console.error("Search query error:", err);
         showToast("Search failed: " + err.message, "error");
@@ -1895,27 +1912,44 @@ function renderSearchResults(query, results) {
     if (results.length === 0) {
         container.innerHTML = `
             <div style="padding:32px 16px; text-align:center; color:var(--text-muted);">
-                <p style="font-size:14px; margin-bottom:8px;">No matching passages found for query <strong>"${escapeHtml(query)}"</strong></p>
-                <p style="font-size:12px;">Try different keywords or switch category filter to "All Nodes".</p>
+                <p style="font-size:14px; margin-bottom:8px;">No matching items found for query <strong>"${escapeHtml(query)}"</strong></p>
+                <p style="font-size:12px;">Try searching for different keywords across documents, files, notes, or tasks.</p>
             </div>
         `;
     } else {
+        const typeIconMap = {
+            "document": "📄",
+            "file": "☁️",
+            "note": "📝",
+            "task": "✔"
+        };
+
         results.forEach(r => {
             const card = document.createElement("div");
             card.className = "result-card";
-            const highlightedContent = highlightQuery(r.content, query);
-            
+            const icon = typeIconMap[r.type] || "📄";
+
             card.innerHTML = `
                 <div class="result-card-header">
-                    <span style="font-weight:600; font-size:13px; color:var(--text-primary);">${escapeHtml(r.document_title)} [Chunk #${r.chunk_index + 1}]</span>
-                    <span class="result-score">Hybrid Relevance: ${(r.score * 100).toFixed(1)}%</span>
+                    <span style="font-weight:600; font-size:13px; color:var(--text-primary);">${icon} ${escapeHtml(r.title)} <span style="font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-left:4px;">[${escapeHtml(r.type)}]</span></span>
+                    <span class="result-score">Score: ${(r.score * 100).toFixed(0)}%</span>
                 </div>
-                <div class="result-snippet">${highlightedContent}</div>
+                <div class="result-snippet">${escapeHtml(r.snippet)}</div>
             `;
+
             card.addEventListener("click", () => {
                 document.getElementById("search-modal").classList.remove("open");
-                document.getElementById("tab-doc").click();
-                selectDocument(r.document_id);
+                if (r.type === "document") {
+                    document.getElementById("tab-doc").click();
+                    selectDocument(r.id);
+                } else if (r.type === "file") {
+                    document.getElementById("tab-storage").click();
+                    openFilePreview({ id: r.id, name: r.title, file_size: (r.metadata || {}).file_size || 0, mime_type: (r.metadata || {}).mime_type || "" });
+                } else if (r.type === "note") {
+                    document.getElementById("tab-notes").click();
+                } else if (r.type === "task") {
+                    document.getElementById("tab-tasks").click();
+                }
             });
             container.appendChild(card);
         });
@@ -2109,4 +2143,872 @@ async function checkInitialSeed() {
 function escapeHtml(str) {
     if (!str) return "";
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/* ==========================================================
+   CLOUD STORAGE & ASSET INTELLIGENCE ENGINE
+   ========================================================== */
+let currentStorageFolder = "";
+let currentStorageView = "all";
+let currentStorageSort = "date_desc";
+let isStorageGridView = true;
+let storageFiles = [];
+let storageFolders = [];
+let activeFileShareId = null;
+
+function setupStorageEvents() {
+    const btnNewFolder = document.getElementById("btn-storage-create-folder");
+    const btnQuickFolder = document.getElementById("btn-add-folder-quick");
+    const folderModal = document.getElementById("folder-modal");
+    const closeFolderModal = document.getElementById("btn-close-folder-modal");
+    const submitFolder = document.getElementById("btn-submit-folder");
+
+    if (btnNewFolder) btnNewFolder.addEventListener("click", () => openFolderModal());
+    if (btnQuickFolder) btnQuickFolder.addEventListener("click", () => openFolderModal());
+    if (closeFolderModal) closeFolderModal.addEventListener("click", () => folderModal.classList.remove("open"));
+    if (submitFolder) submitFolder.addEventListener("click", submitNewFolder);
+
+    // Color Swatches
+    document.querySelectorAll(".folder-color-picker .color-swatch").forEach(swatch => {
+        swatch.addEventListener("click", () => {
+            document.querySelectorAll(".folder-color-picker .color-swatch").forEach(s => s.classList.remove("active"));
+            swatch.classList.add("active");
+        });
+    });
+
+    // File Upload triggers
+    const triggerUpload = document.getElementById("btn-storage-trigger-upload");
+    const storageFileInput = document.getElementById("storage-file-input");
+    if (triggerUpload && storageFileInput) {
+        triggerUpload.addEventListener("click", () => {
+            storageFileInput.value = "";
+            storageFileInput.click();
+        });
+        storageFileInput.addEventListener("change", (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                handleStorageFilesUpload(Array.from(e.target.files));
+            }
+        });
+    }
+
+    // Drag and Drop Zone
+    const dropzone = document.getElementById("storage-dropzone");
+    if (dropzone) {
+        dropzone.addEventListener("click", () => {
+            if (storageFileInput) {
+                storageFileInput.value = "";
+                storageFileInput.click();
+            }
+        });
+
+        ["dragenter", "dragover"].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.add("dragover");
+            });
+        });
+
+        ["dragleave", "drop"].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove("dragover");
+            });
+        });
+
+        dropzone.addEventListener("drop", (e) => {
+            const dt = e.dataTransfer;
+            if (dt && dt.files && dt.files.length > 0) {
+                handleStorageFilesUpload(Array.from(dt.files));
+            }
+        });
+    }
+
+    // Search and Sort
+    const searchInput = document.getElementById("storage-search-input");
+    if (searchInput) {
+        searchInput.addEventListener("input", () => renderStorageFiles());
+    }
+
+    const sortSelect = document.getElementById("storage-sort-select");
+    if (sortSelect) {
+        sortSelect.addEventListener("change", (e) => {
+            currentStorageSort = e.target.value;
+            loadStorageFiles();
+        });
+    }
+
+    // Grid vs List View toggle
+    const btnGridView = document.getElementById("btn-storage-view-grid");
+    const btnListView = document.getElementById("btn-storage-view-list");
+    if (btnGridView && btnListView) {
+        btnGridView.addEventListener("click", () => {
+            isStorageGridView = true;
+            btnGridView.classList.add("active");
+            btnListView.classList.remove("active");
+            renderStorageFiles();
+        });
+        btnListView.addEventListener("click", () => {
+            isStorageGridView = false;
+            btnListView.classList.add("active");
+            btnGridView.classList.remove("active");
+            renderStorageFiles();
+        });
+    }
+
+    // View filter buttons (all, favorites, trash)
+    document.querySelectorAll(".storage-views-filter .folder-item").forEach(item => {
+        item.addEventListener("click", () => {
+            document.querySelectorAll(".storage-views-filter .folder-item").forEach(i => i.classList.remove("active"));
+            document.querySelectorAll(".storage-folders-list .folder-item").forEach(i => i.classList.remove("active"));
+            item.classList.add("active");
+            currentStorageView = item.dataset.view;
+            currentStorageFolder = "";
+            updateBreadcrumbs("Root");
+            loadStorageFiles();
+        });
+    });
+
+    // Close preview modal
+    const closePreview = document.getElementById("btn-close-preview-modal");
+    if (closePreview) {
+        closePreview.addEventListener("click", () => {
+            document.getElementById("file-preview-modal").classList.remove("open");
+        });
+    }
+
+    // File Share modal
+    const closeFileShare = document.getElementById("btn-close-file-share-modal");
+    const btnGenerateShare = document.getElementById("btn-generate-file-share");
+    const btnCopyShare = document.getElementById("btn-copy-file-share");
+    if (closeFileShare) {
+        closeFileShare.addEventListener("click", () => {
+            document.getElementById("file-share-modal").classList.remove("open");
+        });
+    }
+    if (btnGenerateShare) {
+        btnGenerateShare.addEventListener("click", generateFileShareLink);
+    }
+    if (btnCopyShare) {
+        btnCopyShare.addEventListener("click", () => {
+            const urlInput = document.getElementById("file-share-url-input");
+            urlInput.select();
+            navigator.clipboard.writeText(urlInput.value);
+            showToast("Share link copied to clipboard!", "success");
+        });
+    }
+}
+
+async function loadStorageData() {
+    await Promise.all([
+        loadStorageDashboard(),
+        loadStorageFolders(),
+        loadStorageFiles()
+    ]);
+}
+
+async function loadStorageDashboard() {
+    try {
+        const res = await fetch(`/api/v1/storage/dashboard?workspace_id=${activeWorkspaceId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Telemetry cards
+        const usedElem = document.getElementById("storage-stat-used");
+        const capElem = document.getElementById("storage-stat-capacity");
+        const progFill = document.getElementById("storage-progress-fill");
+        const filesElem = document.getElementById("storage-stat-files");
+        const foldersElem = document.getElementById("storage-stat-folders");
+        const providerElem = document.getElementById("storage-stat-provider");
+        const bucketElem = document.getElementById("storage-stat-bucket");
+        const badge = document.getElementById("storage-provider-badge");
+
+        if (usedElem) usedElem.textContent = `${data.used_storage_mb.toFixed(1)} MB`;
+        if (capElem) capElem.textContent = `${data.usage_percentage.toFixed(1)}% of ${data.storage_quota_mb} MB quota`;
+        if (progFill) progFill.style.width = `${Math.min(100, Math.max(2, data.usage_percentage))}%`;
+        if (filesElem) filesElem.textContent = data.total_files;
+        if (foldersElem) foldersElem.textContent = data.total_folders;
+
+        if (providerElem) {
+            providerElem.textContent = data.is_r2_active ? "Cloudflare R2" : "Local Storage";
+        }
+        if (bucketElem) {
+            bucketElem.textContent = data.is_r2_active ? "R2 Active Bucket" : "local_storage/ operating";
+        }
+
+        if (badge) {
+            if (data.is_r2_active) {
+                badge.className = "provider-badge provider-r2";
+                badge.textContent = "Cloudflare R2 Active";
+            } else {
+                badge.className = "provider-badge provider-local";
+                badge.textContent = "Local Fallback";
+            }
+        }
+
+        // Distribution Bar
+        renderStorageDistribution(data.file_type_distribution, data.total_files);
+    } catch (err) {
+        console.error("Storage dashboard error:", err);
+    }
+}
+
+function renderStorageDistribution(dist, totalFiles) {
+    const bar = document.getElementById("storage-dist-bar");
+    const legend = document.getElementById("storage-dist-legend");
+    const summary = document.getElementById("storage-dist-summary");
+    if (!bar || !legend) return;
+
+    bar.innerHTML = "";
+    legend.innerHTML = "";
+
+    const colorPalette = {
+        "pdf": "#f87171",
+        "document": "#38bdf8",
+        "image": "#a855f7",
+        "audio": "#ec4899",
+        "video": "#f59e0b",
+        "spreadsheet": "#22c55e",
+        "text": "#e6a23c",
+        "archive": "#94a3b8",
+        "other": "#64748b"
+    };
+
+    const categories = Object.keys(dist || {});
+    if (categories.length === 0 || totalFiles === 0) {
+        if (summary) summary.textContent = "0 files stored";
+        bar.innerHTML = `<div class="dist-segment" style="width: 100%; background: var(--bg-tertiary);"></div>`;
+        return;
+    }
+
+    if (summary) summary.textContent = `${totalFiles} assets categorized`;
+
+    categories.forEach(cat => {
+        const count = dist[cat];
+        const pct = ((count / totalFiles) * 100).toFixed(1);
+        const color = colorPalette[cat] || "#e6a23c";
+
+        // Segment
+        const seg = document.createElement("div");
+        seg.className = "dist-segment";
+        seg.style.width = `${pct}%`;
+        seg.style.background = color;
+        seg.title = `${cat.toUpperCase()}: ${count} files (${pct}%)`;
+        bar.appendChild(seg);
+
+        // Legend Item
+        const item = document.createElement("div");
+        item.className = "dist-legend-item";
+        item.innerHTML = `
+            <span class="legend-dot" style="background: ${color};"></span>
+            <span>${cat.toUpperCase()} (${count})</span>
+        `;
+        legend.appendChild(item);
+    });
+}
+
+async function loadStorageFolders() {
+    try {
+        const res = await fetch(`/api/v1/storage/folders?workspace_id=${activeWorkspaceId}`);
+        if (!res.ok) return;
+        storageFolders = await res.json();
+
+        const container = document.getElementById("storage-folders-list");
+        if (!container) return;
+        container.innerHTML = "";
+
+        if (storageFolders.length === 0) {
+            container.innerHTML = `<div style="font-size:11px; color:var(--text-muted); padding:6px;">No custom folders yet.</div>`;
+            return;
+        }
+
+        storageFolders.forEach(f => {
+            const btn = document.createElement("button");
+            btn.className = `folder-item ${currentStorageFolder === f.id ? 'active' : ''}`;
+            btn.innerHTML = `
+                <span class="folder-dot" style="background: ${f.color || '#e6a23c'};"></span>
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.name)}</span>
+                <span class="folder-count-badge">${f.file_count || 0}</span>
+            `;
+            btn.addEventListener("click", () => {
+                document.querySelectorAll(".storage-views-filter .folder-item").forEach(i => i.classList.remove("active"));
+                document.querySelectorAll(".storage-folders-list .folder-item").forEach(i => i.classList.remove("active"));
+                btn.classList.add("active");
+                currentStorageFolder = f.id;
+                currentStorageView = "active";
+                updateBreadcrumbs(f.name);
+                loadStorageFiles();
+            });
+            container.appendChild(btn);
+        });
+    } catch (err) {
+        console.error("Failed loading folders:", err);
+    }
+}
+
+function updateBreadcrumbs(name) {
+    const bc = document.getElementById("storage-breadcrumbs");
+    if (!bc) return;
+    if (!currentStorageFolder) {
+        bc.innerHTML = `<span class="crumb active" data-folder="">Root</span>`;
+    } else {
+        bc.innerHTML = `
+            <span class="crumb" id="crumb-root">Root</span>
+            <span>/</span>
+            <span class="crumb active">${escapeHtml(name)}</span>
+        `;
+        const rootCrumb = document.getElementById("crumb-root");
+        if (rootCrumb) {
+            rootCrumb.addEventListener("click", () => {
+                currentStorageFolder = "";
+                document.querySelectorAll(".storage-folders-list .folder-item").forEach(i => i.classList.remove("active"));
+                document.querySelector(".storage-views-filter .folder-item[data-view='all']").classList.add("active");
+                updateBreadcrumbs("Root");
+                loadStorageFiles();
+            });
+        }
+    }
+}
+
+async function loadStorageFiles() {
+    try {
+        let url = `/api/v1/storage/files?workspace_id=${activeWorkspaceId}&view=${currentStorageView}&sort_by=${currentStorageSort}`;
+        if (currentStorageFolder) url += `&folder_id=${currentStorageFolder}`;
+
+        const res = await fetch(url);
+        if (!res.ok) return;
+        storageFiles = await res.json();
+        renderStorageFiles();
+    } catch (err) {
+        console.error("Failed loading storage files:", err);
+    }
+}
+
+function renderStorageFiles() {
+    const container = document.getElementById("storage-files-container");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const searchInput = document.getElementById("storage-search-input");
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : "";
+
+    let filtered = storageFiles;
+    if (query) {
+        filtered = filtered.filter(f => f.name.toLowerCase().includes(query) || f.file_extension.toLowerCase().includes(query));
+    }
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div style="grid-column: 1 / -1; text-align: center; padding: 48px 16px; color: var(--text-muted);">
+                <p style="font-size: 14px; margin-bottom: 6px;">No cloud files found in this view.</p>
+                <p style="font-size: 12px;">Drag and drop files above or click "Upload File" to add assets.</p>
+            </div>
+        `;
+        return;
+    }
+
+    if (isStorageGridView) {
+        container.className = "storage-files-grid";
+        filtered.forEach(file => {
+            const card = document.createElement("div");
+            card.className = "storage-file-card";
+
+            const ext = (file.file_extension || "").toLowerCase();
+            const mime = (file.mime_type || "").toLowerCase();
+            let iconText = "📄";
+            if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext) || mime.startsWith("image/")) iconText = "🖼️";
+            else if (ext === "pdf" || mime === "application/pdf") iconText = "📕";
+            else if (["txt", "md", "json", "py", "js"].includes(ext)) iconText = "📝";
+            else if (["mp3", "wav"].includes(ext)) iconText = "🎵";
+            else if (["mp4", "webm"].includes(ext)) iconText = "🎬";
+            else if (["zip", "tar", "gz"].includes(ext)) iconText = "📦";
+
+            const formattedSize = `${(file.file_size / 1024).toFixed(1)} KB`;
+            const dateStr = new Date(file.created_at).toLocaleDateString();
+
+            card.innerHTML = `
+                <div class="file-card-preview" title="Click to preview">
+                    ${iconText}
+                </div>
+                <div class="file-card-info">
+                    <span class="file-card-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+                    <div class="file-card-meta">
+                        <span>${formattedSize}</span>
+                        <span>${dateStr}</span>
+                    </div>
+                </div>
+                <div class="file-card-actions">
+                    <button class="btn-icon btn-sm btn-fav-file" title="Star File" style="color: ${file.is_favorite ? 'var(--accent-amber)' : 'inherit'};">★</button>
+                    <button class="btn-icon btn-sm btn-preview-file" title="Preview File">👁</button>
+                    <button class="btn-icon btn-sm btn-share-file" title="Share Link">🔗</button>
+                    <a href="/api/v1/storage/files/${file.id}/download" class="btn-icon btn-sm" title="Download" download>⬇</a>
+                    ${file.is_trash ? `
+                        <button class="btn-icon btn-sm btn-restore-file" title="Restore" style="color:var(--accent-green);">↺</button>
+                        <button class="btn-icon btn-sm btn-perm-delete-file" title="Permanent Delete" style="color:var(--accent-red);">✕</button>
+                    ` : `
+                        <button class="btn-icon btn-sm btn-trash-file" title="Move to Trash" style="color:var(--text-muted);">🗑</button>
+                    `}
+                </div>
+            `;
+
+            // Actions
+            card.querySelector(".file-card-preview").addEventListener("click", () => openFilePreview(file));
+            card.querySelector(".btn-preview-file").addEventListener("click", () => openFilePreview(file));
+            card.querySelector(".btn-share-file").addEventListener("click", () => openFileShareModal(file.id));
+            card.querySelector(".btn-fav-file").addEventListener("click", () => toggleFileFavorite(file.id));
+
+            if (file.is_trash) {
+                card.querySelector(".btn-restore-file").addEventListener("click", () => restoreFile(file.id));
+                card.querySelector(".btn-perm-delete-file").addEventListener("click", () => deleteFilePermanent(file.id));
+            } else {
+                card.querySelector(".btn-trash-file").addEventListener("click", () => moveFileToTrash(file.id));
+            }
+
+            container.appendChild(card);
+        });
+    } else {
+        // Table List View
+        container.className = "storage-files-table-container";
+        const table = document.createElement("table");
+        table.className = "storage-files-list-view";
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Type</th>
+                    <th>Uploaded</th>
+                    <th style="text-align:right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        `;
+        const tbody = table.querySelector("tbody");
+
+        filtered.forEach(file => {
+            const tr = document.createElement("tr");
+            const formattedSize = `${(file.file_size / 1024).toFixed(1)} KB`;
+            const dateStr = new Date(file.created_at).toLocaleDateString();
+
+            tr.innerHTML = `
+                <td style="font-weight:600; cursor:pointer;" class="cell-file-name">${escapeHtml(file.name)}</td>
+                <td>${formattedSize}</td>
+                <td><span style="font-size:10px; padding:2px 6px; border-radius:4px; background:var(--bg-tertiary);">${file.file_extension || 'bin'}</span></td>
+                <td>${dateStr}</td>
+                <td style="text-align:right;">
+                    <button class="btn-icon btn-sm btn-preview-file" title="Preview">👁</button>
+                    <button class="btn-icon btn-sm btn-share-file" title="Share">🔗</button>
+                    <a href="/api/v1/storage/files/${file.id}/download" class="btn-icon btn-sm" title="Download" download>⬇</a>
+                    ${file.is_trash ? `
+                        <button class="btn-icon btn-sm btn-restore-file" title="Restore" style="color:var(--accent-green);">↺</button>
+                    ` : `
+                        <button class="btn-icon btn-sm btn-trash-file" title="Trash">🗑</button>
+                    `}
+                </td>
+            `;
+
+            tr.querySelector(".cell-file-name").addEventListener("click", () => openFilePreview(file));
+            tr.querySelector(".btn-preview-file").addEventListener("click", () => openFilePreview(file));
+            tr.querySelector(".btn-share-file").addEventListener("click", () => openFileShareModal(file.id));
+
+            if (file.is_trash) {
+                tr.querySelector(".btn-restore-file").addEventListener("click", () => restoreFile(file.id));
+            } else {
+                tr.querySelector(".btn-trash-file").addEventListener("click", () => moveFileToTrash(file.id));
+            }
+
+            tbody.appendChild(tr);
+        });
+
+        container.appendChild(table);
+    }
+}
+
+async function handleStorageFilesUpload(files) {
+    if (!files || files.length === 0) return;
+    const queue = document.getElementById("storage-upload-queue");
+    if (queue) queue.style.display = "flex";
+
+    for (const file of files) {
+        const item = document.createElement("div");
+        item.className = "upload-queue-item";
+        item.innerHTML = `
+            <div class="upload-queue-meta">
+                <span><strong>${escapeHtml(file.name)}</strong> (${(file.size / 1024).toFixed(1)} KB)</span>
+                <span class="upload-status">Uploading...</span>
+            </div>
+            <div class="upload-queue-progress"><div class="upload-queue-fill" style="width: 25%;"></div></div>
+        `;
+        if (queue) queue.appendChild(item);
+
+        try {
+            const formData = new FormData();
+            formData.append("file", file);
+            if (currentStorageFolder) formData.append("folder_id", currentStorageFolder);
+            formData.append("workspace_id", activeWorkspaceId);
+
+            item.querySelector(".upload-queue-fill").style.width = "65%";
+
+            const res = await fetch("/api/v1/storage/upload", {
+                method: "POST",
+                body: formData
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || "Upload failed");
+            }
+
+            item.querySelector(".upload-queue-fill").style.width = "100%";
+            item.querySelector(".upload-status").textContent = "Completed ✔";
+            item.querySelector(".upload-status").style.color = "var(--accent-green)";
+            showToast(`Uploaded "${file.name}" to Cloud Storage`, "success");
+        } catch (err) {
+            item.querySelector(".upload-status").textContent = "Failed ✕";
+            item.querySelector(".upload-status").style.color = "var(--accent-red)";
+            showToast(`Upload failed for "${file.name}": ${err.message}`, "error");
+        }
+    }
+
+    setTimeout(() => {
+        if (queue) {
+            queue.innerHTML = "";
+            queue.style.display = "none";
+        }
+    }, 2500);
+
+    await loadStorageData();
+}
+
+async function openFilePreview(file) {
+    const modal = document.getElementById("file-preview-modal");
+    const title = document.getElementById("preview-file-title");
+    const size = document.getElementById("preview-file-size");
+    const icon = document.getElementById("preview-file-icon");
+    const body = document.getElementById("file-preview-body");
+    const dlBtn = document.getElementById("preview-download-btn");
+
+    title.textContent = file.name;
+    size.textContent = `${(file.file_size / 1024).toFixed(1)} KB`;
+    dlBtn.href = `/api/v1/storage/files/${file.id}/download`;
+
+    const ext = (file.file_extension || "").toLowerCase();
+    const mime = (file.mime_type || "").toLowerCase();
+
+    body.innerHTML = `<div style="text-align:center; color:var(--text-muted);"><p>Loading preview...</p></div>`;
+    modal.classList.add("open");
+
+    const previewUrl = `/api/v1/storage/files/${file.id}/preview`;
+
+    if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext) || mime.startsWith("image/")) {
+        icon.textContent = "🖼️";
+        body.innerHTML = `<img src="${previewUrl}" class="file-preview-image" alt="${escapeHtml(file.name)}">`;
+    } else if (ext === "pdf" || mime === "application/pdf") {
+        icon.textContent = "📕";
+        body.innerHTML = `<iframe src="${previewUrl}" class="file-preview-iframe" title="${escapeHtml(file.name)}"></iframe>`;
+    } else if (["txt", "md", "markdown", "json", "py", "js", "html", "css", "csv", "yaml", "yml", "sql", "sh", "xml", "log"].includes(ext) || mime.startsWith("text/")) {
+        icon.textContent = "📝";
+        try {
+            const res = await fetch(previewUrl);
+            const text = await res.text();
+            body.innerHTML = `<pre class="file-preview-code"><code>${escapeHtml(text)}</code></pre>`;
+        } catch (e) {
+            body.innerHTML = `<p style="color:var(--accent-red);">Failed to render text preview.</p>`;
+        }
+    } else if (["mp3", "wav", "ogg", "m4a", "flac"].includes(ext) || mime.startsWith("audio/")) {
+        icon.textContent = "🎵";
+        body.innerHTML = `
+            <div style="text-align:center;">
+                <p style="margin-bottom:12px; font-weight:600;">${escapeHtml(file.name)}</p>
+                <audio controls src="${previewUrl}" style="width:100%; max-width:400px;"></audio>
+            </div>
+        `;
+    } else if (["mp4", "webm", "mov"].includes(ext) || mime.startsWith("video/")) {
+        icon.textContent = "🎬";
+        body.innerHTML = `
+            <video controls src="${previewUrl}" style="max-width:100%; max-height:480px; border-radius:4px;"></video>
+        `;
+    } else {
+        icon.textContent = "📦";
+        body.innerHTML = `
+            <div style="text-align:center; padding:32px;">
+                <p style="font-size:16px; font-weight:600; margin-bottom:8px;">${escapeHtml(file.name)}</p>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Binary asset (${escapeHtml(file.mime_type || 'application/octet-stream')})</p>
+                <a href="/api/v1/storage/files/${file.id}/download" class="btn-primary" download>Download File</a>
+            </div>
+        `;
+    }
+}
+
+function openFileShareModal(fileId) {
+    activeFileShareId = fileId;
+    const modal = document.getElementById("file-share-modal");
+    const resultBox = document.getElementById("file-share-result");
+    if (resultBox) resultBox.style.display = "none";
+    if (modal) modal.classList.add("open");
+}
+
+async function generateFileShareLink() {
+    if (!activeFileShareId) return;
+    const expSelect = document.getElementById("file-share-expiry-select");
+    const hours = expSelect ? parseInt(expSelect.value, 10) : 72;
+
+    try {
+        const res = await fetch(`/api/v1/storage/files/${activeFileShareId}/share`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                access_type: "public_read",
+                expires_in_hours: hours
+            })
+        });
+
+        if (!res.ok) throw new Error("Failed to generate share link");
+        const data = await res.json();
+
+        const shareUrl = `${window.location.origin}/api/v1/storage/share/${data.token}`;
+        const input = document.getElementById("file-share-url-input");
+        const resultBox = document.getElementById("file-share-result");
+
+        if (input) input.value = shareUrl;
+        if (resultBox) resultBox.style.display = "block";
+        showToast("Secure share link generated!", "success");
+    } catch (err) {
+        showToast("Error creating share link: " + err.message, "error");
+    }
+}
+
+async function toggleFileFavorite(fileId) {
+    try {
+        const res = await fetch(`/api/v1/storage/files/${fileId}/favorite`, { method: "POST" });
+        if (res.ok) {
+            const data = await res.json();
+            showToast(data.is_favorite ? "Starred file ⭐" : "Unstarred file", "info");
+            await loadStorageFiles();
+        }
+    } catch (err) {
+        showToast("Failed to star file", "error");
+    }
+}
+
+async function moveFileToTrash(fileId) {
+    try {
+        const res = await fetch(`/api/v1/storage/files/${fileId}/trash`, { method: "POST" });
+        if (res.ok) {
+            showToast("File moved to Trash", "info");
+            await loadStorageData();
+        }
+    } catch (err) {
+        showToast("Error moving file to trash", "error");
+    }
+}
+
+async function restoreFile(fileId) {
+    try {
+        const res = await fetch(`/api/v1/storage/files/${fileId}/restore`, { method: "POST" });
+        if (res.ok) {
+            showToast("File restored from Trash", "success");
+            await loadStorageData();
+        }
+    } catch (err) {
+        showToast("Error restoring file", "error");
+    }
+}
+
+async function deleteFilePermanent(fileId) {
+    if (!confirm("Permanently delete this file? This action cannot be undone.")) return;
+    try {
+        const res = await fetch(`/api/v1/storage/files/${fileId}/permanent`, { method: "DELETE" });
+        if (res.ok) {
+            showToast("File permanently deleted", "success");
+            await loadStorageData();
+        }
+    } catch (err) {
+        showToast("Error deleting file", "error");
+    }
+}
+
+function openFolderModal() {
+    const modal = document.getElementById("folder-modal");
+    const input = document.getElementById("folder-name-input");
+    if (input) input.value = "";
+    if (modal) modal.classList.add("open");
+}
+
+async function submitNewFolder() {
+    const input = document.getElementById("folder-name-input");
+    const name = input ? input.value.trim() : "";
+    if (!name) {
+        showToast("Please enter a folder name", "info");
+        return;
+    }
+
+    const activeSwatch = document.querySelector(".folder-color-picker .color-swatch.active");
+    const color = activeSwatch ? activeSwatch.dataset.color : "#e6a23c";
+
+    try {
+        const res = await fetch("/api/v1/storage/folders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                name,
+                color,
+                workspace_id: activeWorkspaceId
+            })
+        });
+
+        if (!res.ok) throw new Error("Failed to create folder");
+        showToast(`Folder "${name}" created!`, "success");
+        document.getElementById("folder-modal").classList.remove("open");
+        await loadStorageFolders();
+    } catch (err) {
+        showToast("Error creating folder: " + err.message, "error");
+    }
+}
+
+/* ==========================================================
+   DOCUMENT VERSION HISTORY & COMPARISON ENGINE
+   ========================================================== */
+async function openDocumentVersionsModal(docId) {
+    const modal = document.getElementById("version-history-modal");
+    const list = document.getElementById("doc-versions-list");
+    const diffContainer = document.getElementById("diff-viewer-container");
+    const selA = document.getElementById("diff-version-a-select");
+    const selB = document.getElementById("diff-version-b-select");
+
+    if (diffContainer) {
+        diffContainer.style.display = "none";
+        diffContainer.innerHTML = "";
+    }
+    if (list) list.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted);">Loading revision history...</div>`;
+    if (modal) modal.classList.add("open");
+
+    try {
+        const res = await fetch(`/api/v1/documents/${docId}/versions`);
+        if (!res.ok) throw new Error("Failed to load versions");
+        const versions = await res.json();
+
+        if (selA) selA.innerHTML = "";
+        if (selB) selB.innerHTML = "";
+        if (list) list.innerHTML = "";
+
+        if (versions.length === 0) {
+            if (list) list.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted);">No historical snapshots recorded yet. Versions are automatically created on each save.</div>`;
+            return;
+        }
+
+        versions.forEach((v, idx) => {
+            if (selA) {
+                const optA = document.createElement("option");
+                optA.value = v.version_number;
+                optA.textContent = `v${v.version_number} (${new Date(v.created_at).toLocaleDateString()})`;
+                if (idx === 1 || (versions.length === 1 && idx === 0)) optA.selected = true;
+                selA.appendChild(optA);
+            }
+
+            if (selB) {
+                const optB = document.createElement("option");
+                optB.value = v.version_number;
+                optB.textContent = `v${v.version_number} (${new Date(v.created_at).toLocaleDateString()})`;
+                if (idx === 0) optB.selected = true;
+                selB.appendChild(optB);
+            }
+
+            const item = document.createElement("div");
+            item.className = "version-item";
+            item.innerHTML = `
+                <div class="version-meta">
+                    <span class="version-num-badge">Version ${v.version_number} — ${escapeHtml(v.title)}</span>
+                    <span class="version-timestamp">${new Date(v.created_at).toLocaleString()}</span>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-subtle btn-sm btn-restore-version" data-version="${v.version_number}">Restore Version</button>
+                </div>
+            `;
+
+            item.querySelector(".btn-restore-version").addEventListener("click", () => {
+                restoreDocVersion(docId, v.version_number);
+            });
+
+            if (list) list.appendChild(item);
+        });
+    } catch (err) {
+        if (list) list.innerHTML = `<div style="color:var(--accent-red); padding:16px;">Failed loading version history: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+async function runVersionDiff() {
+    if (!currentDocId) return;
+    const selA = document.getElementById("diff-version-a-select");
+    const selB = document.getElementById("diff-version-b-select");
+    if (!selA || !selB) return;
+
+    const vA = parseInt(selA.value, 10);
+    const vB = parseInt(selB.value, 10);
+    const diffContainer = document.getElementById("diff-viewer-container");
+
+    try {
+        const res = await fetch(`/api/v1/documents/${currentDocId}/compare`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                document_id: currentDocId,
+                version_a: vA,
+                version_b: vB
+            })
+        });
+
+        if (!res.ok) throw new Error("Failed to compute diff");
+        const diffData = await res.json();
+
+        if (diffContainer) {
+            diffContainer.style.display = "block";
+            diffContainer.innerHTML = `
+                <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-weight:600;">
+                    <span>Diff: Version ${vA} vs Version ${vB}</span>
+                    <span><span style="color:#4ade80;">+${diffData.additions} additions</span> | <span style="color:#f87171;">-${diffData.deletions} deletions</span></span>
+                </div>
+            `;
+
+            const pre = document.createElement("pre");
+            pre.style.margin = "0";
+
+            if (!diffData.diff_text || diffData.diff_text.trim().length === 0) {
+                pre.innerHTML = `<span style="color:var(--text-muted);">No textual differences between version ${vA} and version ${vB}.</span>`;
+            } else {
+                diffData.diff_text.split("\n").forEach(line => {
+                    const lineSpan = document.createElement("span");
+                    if (line.startsWith("+") && !line.startsWith("+++")) {
+                        lineSpan.className = "diff-line-added";
+                    } else if (line.startsWith("-") && !line.startsWith("---")) {
+                        lineSpan.className = "diff-line-deleted";
+                    } else if (line.startsWith("@@")) {
+                        lineSpan.className = "diff-line-info";
+                    }
+                    lineSpan.textContent = line + "\n";
+                    pre.appendChild(lineSpan);
+                });
+            }
+            diffContainer.appendChild(pre);
+        }
+    } catch (err) {
+        showToast("Error computing diff: " + err.message, "error");
+    }
+}
+
+async function restoreDocVersion(docId, versionNum) {
+    if (!confirm(`Restore document to version ${versionNum}? Current changes will be snapshotted as a new version.`)) return;
+
+    try {
+        const res = await fetch(`/api/v1/documents/${docId}/restore-version/${versionNum}`, { method: "POST" });
+        if (!res.ok) throw new Error("Failed to restore version");
+        const restored = await res.json();
+        showToast(`Document successfully restored to version ${versionNum}!`, "success");
+        document.getElementById("version-history-modal").classList.remove("open");
+        await loadDocuments();
+        await selectDocument(restored.id);
+    } catch (err) {
+        showToast("Error restoring version: " + err.message, "error");
+    }
 }

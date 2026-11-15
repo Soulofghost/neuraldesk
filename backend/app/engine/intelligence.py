@@ -170,4 +170,96 @@ class DocumentIntelligence:
             "confidence": round(top_chunks[0]["score"], 3)
         }
 
+    def extract_timeline(self, text: str) -> List[Dict[str, str]]:
+        """
+        Extracts temporal milestones, dates, quarters, years, and related events.
+        """
+        date_patterns = [
+            r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b',
+            r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}\b',
+            r'\b(?:Q[1-4]|Quarter\s+[1-4])\s+\d{4}\b',
+            r'\b(?:19|20)\d{2}\b',
+            r'\b\d{4}-\d{2}-\d{2}\b'
+        ]
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        timeline = []
+        seen_events = set()
+
+        for s in sentences:
+            s_clean = s.strip()
+            for pat in date_patterns:
+                matches = re.findall(pat, s_clean, re.IGNORECASE)
+                for date_str in matches:
+                    event_summary = s_clean[:180] + ("..." if len(s_clean) > 180 else "")
+                    if event_summary not in seen_events:
+                        seen_events.add(event_summary)
+                        timeline.append({
+                            "date": date_str,
+                            "event": event_summary
+                        })
+                    break
+
+        return timeline[:12]
+
+    def classify_document(self, text: str) -> Dict[str, Any]:
+        """
+        Analyzes content to recommend category, readability score, estimated read time, and sentiment.
+        """
+        words = re.findall(r'\b\w+\b', text)
+        word_count = len(words)
+        read_time_min = max(1, math.ceil(word_count / 200)) if word_count > 0 else 0
+
+        # Category heuristics
+        categories = {
+            "Engineering": ["api", "database", "vector", "sql", "architecture", "server", "code", "endpoint", "backend", "cache", "distributed", "cluster", "http"],
+            "Research": ["analysis", "hypothesis", "study", "results", "experiment", "methodology", "literature", "paper", "evaluation", "citation"],
+            "Product": ["feature", "roadmap", "user", "onboarding", "ux", "metrics", "retention", "launch", "release", "feedback", "persona"],
+            "Operations": ["deployment", "infrastructure", "kubernetes", "docker", "pipeline", "monitoring", "alert", "incident", "sla", "security"],
+            "Business": ["revenue", "strategy", "market", "sales", "client", "quarterly", "budget", "pricing", "contract", "customer"]
+        }
+
+        text_lower = text.lower()
+        cat_scores = {}
+        for cat, kw_list in categories.items():
+            hits = sum(1 for kw in kw_list if kw in text_lower)
+            cat_scores[cat] = hits
+
+        suggested_category = max(cat_scores, key=cat_scores.get) if max(cat_scores.values(), default=0) > 0 else "General"
+
+        # Complexity / Readability (Average word length + sentence count)
+        sentences = [s for s in re.split(r'[.!?]', text) if s.strip()]
+        avg_sentence_len = word_count / max(1, len(sentences))
+        avg_word_len = sum(len(w) for w in words) / max(1, word_count)
+        complexity = "Advanced" if avg_sentence_len > 18 or avg_word_len > 5.8 else ("Intermediate" if avg_sentence_len > 10 else "Basic")
+
+        return {
+            "suggested_category": suggested_category,
+            "word_count": word_count,
+            "reading_time_minutes": read_time_min,
+            "complexity_level": complexity,
+            "confidence": 0.85 if max(cat_scores.values(), default=0) > 2 else 0.55
+        }
+
+    def compare_documents(self, text_a: str, text_b: str) -> Dict[str, Any]:
+        """
+        Computes semantic vector similarity and identifies common concepts vs unique differences.
+        """
+        vec_a = vector_engine.embed(text_a)
+        vec_b = vector_engine.embed(text_b)
+        similarity = vector_engine.cosine_similarity(vec_a, vec_b)
+
+        words_a = set(w.lower() for w in re.findall(r'\b[a-zA-Z]{4,20}\b', text_a) if w.lower() not in self.stop_words)
+        words_b = set(w.lower() for w in re.findall(r'\b[a-zA-Z]{4,20}\b', text_b) if w.lower() not in self.stop_words)
+
+        common_themes = sorted(list(words_a.intersection(words_b)))[:10]
+        unique_to_a = sorted(list(words_a.difference(words_b)))[:8]
+        unique_to_b = sorted(list(words_b.difference(words_a)))[:8]
+
+        return {
+            "semantic_similarity": round(similarity, 4),
+            "common_concepts": common_themes,
+            "unique_to_first": unique_to_a,
+            "unique_to_second": unique_to_b
+        }
+
 intelligence_engine = DocumentIntelligence()

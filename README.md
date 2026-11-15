@@ -42,43 +42,62 @@ NeuralDesk 2.0 provides an embedded, self-contained semantic knowledge engine:
 
 ## 4. Key SaaS Modules
 
-### A. Intelligent Dashboard
-- Real-time telemetry: Total documents, dense vector chunks, knowledge notes, active tasks, and storage quota meter.
-- Category breakdown and supported file format distributions.
-- Live system activity stream and audit log tracking creates, updates, AI queries, and shares.
+### A. Cloud Storage System & Asset Intelligence (Cloudflare R2 / S3)
+- **Object Storage Abstraction Layer:** Seamlessly switches between Cloudflare R2 (S3-compatible API via `boto3`) and deterministic local storage fallback (`operating_local_fallback`).
+- **Direct Browser Presigned Uploads:** Generates secure presigned `PUT` URLs allowing client-to-R2 uploads, bypassing serverless request size limits.
+- **Upload Verification & Checksums:** Computes and verifies SHA-256 checksums, byte sizes, and MIME types.
+- **Cloud Storage Dashboard:** Live capacity tracking (MB used of 500 MB quota), file count, folder count, provider status pill, and category breakdown progress bar.
+- **Interactive File Manager:** Nested directory navigation, drag-and-drop dropzone, grid and list view modes, search and multi-criteria sorting (name, date, size).
+- **Multi-Format In-Browser Previews:** High-fidelity previews for Images, PDFs (`iframe`), Code & Markdown (`pre code`), Audio (`<audio controls>`), and Video (`<video controls>`).
+- **Tokenized Public Sharing:** Expiring public share links with hit counters and direct downloads.
 
-### B. Advanced Document Management
+### B. Intelligent Dashboard
+- Real-time telemetry: Total documents, dense vector chunks, cloud assets, knowledge notes, active tasks, and storage quota meter.
+- Category breakdown and supported file format distributions.
+- Live system activity stream and audit log tracking creates, updates, uploads, AI queries, and shares.
+
+### C. Advanced Document Management & Version History
 - Multi-format file ingestion (PDF, DOCX, TXT, MD, CSV, JSON) via drag-and-drop or file picker.
+- **Document Version Snapshots:** Automatic chronological snapshots on each save (`document_versions`).
+- **Interactive Diff Viewer:** Side-by-side or unified additions and deletions comparison with KaTeX/line highlighting.
+- **One-Click Reversion:** Instant document restoration to any historical version snapshot.
+- **Bulk Operations:** Multi-document bulk favorite, bulk trash, bulk restore, bulk categorize, and bulk delete.
 - Document lifecycle filters: Active, Favorites (⭐), Archive, and Trash & Restore.
 - One-click document export to formatted Markdown (`.md`) or raw JSON.
-- Real-time chunk telemetry drawer and semantic graph backlinks.
 
-### C. AI Document Intelligence
+### D. AI Document Intelligence
 - **Extractive Salience Summarization:** Top sentence scoring using token frequency and position weights.
 - **Key Proposition Takeaways:** Structural concept extraction without hallucination.
 - **Entity & Concept Detection:** Automatically detects architectural patterns, libraries, protocols, and system components.
-- **Action Item Extraction:** Auto-extracts action verbs, deliverables, and priorities from documentation with one-click conversion to tasks.
+- **Timeline & Milestone Extraction:** Detects dates, quarters, years, and deadlines across documents.
+- **Document Topic & Complexity Classification:** Computes reading time, readability complexity, and suggested domain categorization.
+- **Cross-Document Comparative Analysis:** Evaluates semantic similarity, common themes, and unique contrasts between documents.
+- **Action Item Extraction:** Auto-extracts action verbs, deliverables, and priorities with one-click conversion to tasks.
 
-### D. Conversational AI Assistant
+### E. Unified Neural Global Search
+- Cross-resource search querying across Documents, Cloud Files, Notes, and Tasks simultaneously.
+- Combined semantic vector similarity (70%) and lexical overlap (30%) with instant contextual snippet extraction.
+
+### F. Conversational AI Assistant
 - Multi-turn conversational research sessions with workspace or document scope selection.
 - Grounded responses with clickable citation tags referencing source chunk provenance.
 - Pre-configured prompt templates for architectural trade-off summaries, data consistency analyses, and action-item auditing.
 
-### E. Notes & Knowledge Capture
+### G. Notes & Knowledge Capture
 - Rich notes grid with pinning (`is_pinned`), tagging (`#tag`), and bidirectional document linkage.
 - Live keyword search across notes.
 
-### F. Kanban Action Item Pipeline
+### H. Kanban Action Item Pipeline
 - Status progression: `To Do` ➔ `In Progress` ➔ `Completed`.
 - Priority indicators: `low`, `medium`, `high`, `urgent`.
 - Auto-extraction button to populate tasks directly from active documents.
 
-### G. Concept Graph Visualization 2.0
+### I. Concept Graph Visualization 2.0
 - Interactive SVG canvas with category color-coding (Architecture: Blue, Engineering: Green, Research: Purple, General: Amber).
 - Dynamic edge weight calculation based on shared taxonomy and vector cosine proximity.
 - Real-time topology recalculation across active workspace documents.
 
-### H. Multi-Workspace Isolation & Collaboration
+### J. Multi-Workspace Isolation & Collaboration
 - Switch workspaces seamlessly or create new isolated knowledge domains.
 - Document commenting and team discussion threads.
 - Public read share tokens with expiration tracking.
@@ -226,7 +245,14 @@ PORT=8000
 
 DB_PATH=backend/data/neuraldesk.db
 
-# Authentication
+# Cloudflare R2 / S3 Object Storage (Optional for Cloud Storage):
+STORAGE_PROVIDER=cloudflare_r2
+R2_ACCOUNT_ID=your_cloudflare_account_id
+R2_ACCESS_KEY_ID=your_r2_access_key_id
+R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
+R2_BUCKET_NAME=neuraldesk-assets
+
+# Authentication & Quota
 JWT_SECRET_KEY=neuraldesk-production-super-secret-key-change-me-in-production
 STORAGE_QUOTA_MB=500
 ```
@@ -249,16 +275,42 @@ Interactive OpenAPI documentation is accessible at `/docs` (and `/api/docs`).
 | `POST` | `/api/v1/workspaces` | Create isolated workspace |
 | `GET` | `/api/v1/documents` | List documents with workspace, view, and category filtering |
 | `POST` | `/api/v1/documents` | Create document, calculate semantic chunks and vector embeddings |
+| `POST` | `/api/v1/documents/bulk` | Bulk operations (favorite, unfavorite, trash, restore, delete, categorize) |
 | `POST` | `/api/v1/documents/upload` | Ingest PDF, DOCX, TXT, MD, CSV, or JSON file |
 | `GET` | `/api/v1/documents/{id}`| Fetch document, chunk vectors, and relational backlinks |
+| `GET` | `/api/v1/documents/{id}/versions` | Retrieve chronological revision snapshots |
+| `POST` | `/api/v1/documents/{id}/restore-version/{v}` | Restore document to historical version snapshot |
+| `POST` | `/api/v1/documents/{id}/compare` | Compute line-level unified diff and additions/deletions between versions |
 | `POST` | `/api/v1/documents/{id}/favorite`| Toggle favorite status |
 | `POST` | `/api/v1/documents/{id}/restore`| Restore document from Trash |
 | `GET` | `/api/v1/documents/{id}/export`| Export document as formatted Markdown (`.md`) or raw JSON |
-| `PUT` | `/api/v1/documents/{id}`| Update document content and recalculate vector index & graph edges |
+| `PUT` | `/api/v1/documents/{id}`| Update document content, save version snapshot & recalculate vector index |
 | `DELETE` | `/api/v1/documents/{id}`| Move document to trash / cascade deletion |
+| `GET` | `/api/v1/storage/status` | Cloudflare R2 / S3 connection status and provider telemetry |
+| `GET` | `/api/v1/storage/dashboard` | Aggregated storage telemetry: total bytes, quota, distribution, recent files |
+| `GET` | `/api/v1/storage/files` | List files with folder hierarchy, search, sorting, and trash filtering |
+| `POST` | `/api/v1/storage/upload` | Direct multipart file upload to Cloudflare R2 with SHA-256 verification |
+| `POST` | `/api/v1/storage/upload/presign` | Generate direct browser-to-R2 presigned PUT upload URL |
+| `POST` | `/api/v1/storage/upload/complete`| Verify presigned upload completion against R2 and index metadata |
+| `GET` | `/api/v1/storage/files/{id}` | Retrieve cloud file metadata and download URL |
+| `GET` | `/api/v1/storage/files/{id}/preview` | In-browser preview streaming for images, PDFs, text, audio, video |
+| `GET` | `/api/v1/storage/files/{id}/download` | Stream attachment download with original filename |
+| `POST` | `/api/v1/storage/files/{id}/share` | Generate expiring public share link with token |
+| `GET` | `/api/v1/storage/share/{token}` | Public read access to shared asset |
+| `POST` | `/api/v1/storage/files/{id}/trash` | Soft-delete file to trash |
+| `POST` | `/api/v1/storage/files/{id}/restore` | Restore file from trash |
+| `DELETE` | `/api/v1/storage/files/{id}/permanent` | Permanently remove file from R2 bucket and database |
+| `GET` | `/api/v1/storage/folders` | List folders with file counts |
+| `POST` | `/api/v1/storage/folders` | Create folder with custom color tag |
+| `PUT` | `/api/v1/storage/folders/{id}` | Update folder name and color |
+| `DELETE` | `/api/v1/storage/folders/{id}` | Move folder and contained files to trash |
+| `POST` | `/api/v1/search/global` | Unified cross-resource search across documents, files, notes, tasks |
 | `POST` | `/api/v1/intelligence/summarize` | Generate extractive salience summary and key takeaways |
 | `POST` | `/api/v1/intelligence/entities` | Extract named entities and architectural patterns |
 | `POST` | `/api/v1/intelligence/action-items` | Extract actionable tasks and deliverables |
+| `POST` | `/api/v1/intelligence/timeline` | Extract temporal milestones, dates, and quarterly roadmaps |
+| `POST` | `/api/v1/intelligence/classify` | Analyze reading time, complexity level, and suggested category |
+| `POST` | `/api/v1/intelligence/compare-documents` | Compute semantic similarity, shared concepts, and thematic contrasts |
 | `POST` | `/api/v1/intelligence/ask` | Grounded question-answering with citation attribution |
 | `GET` | `/api/v1/chat/conversations` | List conversational AI sessions |
 | `POST` | `/api/v1/chat/conversations` | Create new conversational research session |
@@ -278,7 +330,7 @@ Interactive OpenAPI documentation is accessible at `/docs` (and `/api/docs`).
 
 ## 11. Testing Instructions
 
-NeuralDesk includes a comprehensive automated test suite testing text chunking boundaries, vector mathematical properties, multi-format parsing, and complete API integration across all 12 router modules:
+NeuralDesk includes a comprehensive automated test suite testing text chunking boundaries, vector mathematical properties, multi-format parsing, cloud storage, presigned uploads, versioning diffs, and complete API integration across all 13 router modules (30 tests):
 
 ```bash
 # Execute full test suite

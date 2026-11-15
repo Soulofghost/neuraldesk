@@ -19,7 +19,8 @@ from app.routers import (
     graph,
     collaboration,
     analytics,
-    admin
+    admin,
+    storage
 )
 from app.schemas import SystemStats
 
@@ -82,6 +83,7 @@ app.include_router(graph.router, prefix="/api/v1")
 app.include_router(collaboration.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(storage.router, prefix="/api/v1")
 
 @app.get("/api/v1/health")
 def health_check():

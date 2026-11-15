@@ -359,6 +359,86 @@ def init_db():
         )
     """)
 
+    # 15. Storage Folders Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS storage_folders (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            user_id TEXT NOT NULL DEFAULT 'system',
+            parent_id TEXT DEFAULT NULL,
+            name TEXT NOT NULL,
+            color TEXT DEFAULT '#e6a23c',
+            is_trash INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 16. Storage Files Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS storage_files (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL DEFAULT 'default',
+            user_id TEXT NOT NULL DEFAULT 'system',
+            folder_id TEXT DEFAULT NULL,
+            name TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            storage_key TEXT UNIQUE NOT NULL,
+            storage_provider TEXT NOT NULL DEFAULT 'r2',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+            file_extension TEXT NOT NULL DEFAULT '',
+            checksum TEXT DEFAULT '',
+            is_favorite INTEGER DEFAULT 0,
+            is_trash INTEGER DEFAULT 0,
+            version INTEGER DEFAULT 1,
+            metadata TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 17. File Shares Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS file_shares (
+            id TEXT PRIMARY KEY,
+            file_id TEXT DEFAULT NULL,
+            folder_id TEXT DEFAULT NULL,
+            token TEXT UNIQUE NOT NULL,
+            access_type TEXT NOT NULL DEFAULT 'public_read',
+            password_hash TEXT DEFAULT NULL,
+            expires_at TEXT DEFAULT NULL,
+            download_count INTEGER DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT 'system',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 18. File Versions Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS file_versions (
+            id TEXT PRIMARY KEY,
+            file_id TEXT NOT NULL,
+            version_number INTEGER NOT NULL,
+            storage_key TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            checksum TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # 19. Document Versions Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_versions (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            version_number INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Performance Indexes
     indexes = [
         ("idx_documents_category", "documents (category)"),
@@ -370,7 +450,13 @@ def init_db():
         ("idx_notes_workspace", "notes (workspace_id)"),
         ("idx_tasks_workspace", "tasks (workspace_id)"),
         ("idx_ai_messages_conv", "ai_messages (conversation_id)"),
-        ("idx_activity_workspace", "activity_logs (workspace_id)")
+        ("idx_activity_workspace", "activity_logs (workspace_id)"),
+        ("idx_storage_files_ws", "storage_files (workspace_id)"),
+        ("idx_storage_files_folder", "storage_files (folder_id)"),
+        ("idx_storage_files_trash", "storage_files (is_trash)"),
+        ("idx_storage_folders_ws", "storage_folders (workspace_id)"),
+        ("idx_file_shares_tok", "file_shares (token)"),
+        ("idx_doc_versions_doc", "document_versions (document_id)")
     ]
     for idx_name, idx_def in indexes:
         try:

@@ -279,3 +279,154 @@ class SystemStats(BaseModel):
     database_engine: str
     version: str
     status: str
+
+
+# ================= CLOUD STORAGE SCHEMAS =================
+class StorageFolderCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    parent_id: Optional[str] = None
+    color: Optional[str] = "#e6a23c"
+    workspace_id: Optional[str] = "default"
+
+class StorageFolderUpdate(BaseModel):
+    name: Optional[str] = None
+    parent_id: Optional[str] = None
+    color: Optional[str] = None
+    is_trash: Optional[int] = None
+
+class StorageFolderResponse(BaseModel):
+    id: str
+    workspace_id: str
+    user_id: str
+    parent_id: Optional[str] = None
+    name: str
+    color: str
+    is_trash: int
+    created_at: str
+    updated_at: str
+    file_count: Optional[int] = 0
+
+class PresignedUploadRequest(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    file_size: int = Field(..., gt=0)
+    mime_type: Optional[str] = "application/octet-stream"
+    folder_id: Optional[str] = None
+    workspace_id: Optional[str] = "default"
+
+class PresignedUploadResponse(BaseModel):
+    upload_url: str
+    method: str
+    headers: Dict[str, str]
+    storage_key: str
+    provider: str
+    expires_in: int
+    file_id: str
+
+class UploadCompleteRequest(BaseModel):
+    storage_key: str
+    filename: str
+    file_size: int
+    mime_type: Optional[str] = "application/octet-stream"
+    folder_id: Optional[str] = None
+    workspace_id: Optional[str] = "default"
+    checksum: Optional[str] = ""
+
+class StorageFileUpdate(BaseModel):
+    name: Optional[str] = None
+    folder_id: Optional[str] = None
+    is_favorite: Optional[int] = None
+    is_trash: Optional[int] = None
+
+class StorageFileResponse(BaseModel):
+    id: str
+    workspace_id: str
+    user_id: str
+    folder_id: Optional[str] = None
+    name: str
+    original_name: str
+    storage_key: str
+    storage_provider: str
+    file_size: int
+    mime_type: str
+    file_extension: str
+    checksum: str
+    is_favorite: int
+    is_trash: int
+    version: int
+    created_at: str
+    updated_at: str
+    download_url: Optional[str] = None
+
+class FileShareCreate(BaseModel):
+    access_type: Optional[str] = "public_read" # public_read, download_only
+    expires_in_hours: Optional[int] = 72
+
+class FileShareResponse(BaseModel):
+    id: str
+    file_id: Optional[str] = None
+    token: str
+    access_type: str
+    share_url: str
+    expires_at: Optional[str] = None
+    created_at: str
+
+class StorageDashboardResponse(BaseModel):
+    total_files: int
+    total_folders: int
+    used_storage_bytes: int
+    used_storage_mb: float
+    storage_quota_mb: int
+    usage_percentage: float
+    file_type_distribution: Dict[str, int]
+    provider: str
+    provider_status: str
+    is_r2_active: bool
+    recent_files: List[StorageFileResponse]
+    large_files: List[StorageFileResponse]
+
+# ================= DOCUMENT VERSIONS & COMPARISON =================
+class BulkDocumentAction(BaseModel):
+    action: str = Field(..., description="Action to perform: trash, restore, delete, favorite, unfavorite, categorize")
+    document_ids: List[str] = Field(..., min_length=1)
+    category: Optional[str] = None
+
+class DocumentVersionResponse(BaseModel):
+    id: str
+    document_id: str
+    version_number: int
+    title: str
+    content: str
+    created_at: str
+
+class DocumentDiffRequest(BaseModel):
+    document_id: str
+    version_a: int
+    version_b: int
+
+class DocumentDiffResponse(BaseModel):
+    document_id: str
+    version_a: int
+    version_b: int
+    diff_text: str
+    additions: int
+    deletions: int
+
+# ================= GLOBAL SEARCH SCHEMAS =================
+class GlobalSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+    workspace_id: Optional[str] = "default"
+    types: Optional[List[str]] = ["documents", "files", "notes", "tasks"]
+    limit: Optional[int] = 20
+
+class GlobalSearchResult(BaseModel):
+    id: str
+    type: str # document, file, note, task
+    title: str
+    snippet: str
+    score: float
+    metadata: Dict[str, Any]
+
+class GlobalSearchResponse(BaseModel):
+    query: str
+    total_results: int
+    results: List[GlobalSearchResult]

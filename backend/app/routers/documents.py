@@ -2,12 +2,16 @@ import uuid
 import json
 import re
 import logging
+import difflib
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Response, Depends
 from typing import List, Optional, Dict, Any
 from app.database import get_db_connection
 from app.auth import get_current_user
-from app.schemas import DocumentCreate, DocumentUpdate, DocumentResponse, DocumentDetailResponse
+from app.schemas import (
+    DocumentCreate, DocumentUpdate, DocumentResponse, DocumentDetailResponse,
+    BulkDocumentAction, DocumentVersionResponse, DocumentDiffRequest, DocumentDiffResponse
+)
 from app.engine.chunker import chunk_text
 from app.engine.embeddings import vector_engine
 from app.engine.graph import recompute_document_edges
@@ -152,6 +156,14 @@ def create_document(doc: DocumentCreate, current_user: Dict[str, Any] = Depends(
             """, (chunk_id, doc_id, c["index"], c["content"], json.dumps(emb)))
 
         recompute_document_edges(conn, doc_id)
+
+        # Record initial document version snapshot
+        version_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO document_versions (id, document_id, version_number, title, content)
+            VALUES (?, ?, ?, ?, ?)
+        """, (version_id, doc_id, 1, title, content))
+
         log_activity(conn, workspace_id, current_user["id"], "Created Document", f'Created "{title}" ({len(chunks)} chunks)')
         conn.commit()
 
@@ -216,6 +228,36 @@ async def upload_document(
         file_type=file_type
     )
     return create_document(doc_create, current_user=current_user)
+
+@router.post("/bulk")
+def bulk_documents_action(bulk: BulkDocumentAction, current_user: Dict[str, Any] = Depends(get_current_user)):
+    if not bulk.document_ids:
+        raise HTTPException(status_code=400, detail="No document IDs provided.")
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in bulk.document_ids)
+        if bulk.action == "trash":
+            cursor.execute(f"UPDATE documents SET is_trash = 1 WHERE id IN ({placeholders})", tuple(bulk.document_ids))
+        elif bulk.action == "restore":
+            cursor.execute(f"UPDATE documents SET is_trash = 0 WHERE id IN ({placeholders})", tuple(bulk.document_ids))
+        elif bulk.action == "delete":
+            cursor.execute(f"DELETE FROM documents WHERE id IN ({placeholders})", tuple(bulk.document_ids))
+            cursor.execute(f"DELETE FROM document_chunks WHERE document_id IN ({placeholders})", tuple(bulk.document_ids))
+            cursor.execute(f"DELETE FROM graph_edges WHERE source_id IN ({placeholders}) OR target_id IN ({placeholders})", tuple(bulk.document_ids) + tuple(bulk.document_ids))
+        elif bulk.action == "favorite":
+            cursor.execute(f"UPDATE documents SET is_favorite = 1 WHERE id IN ({placeholders})", tuple(bulk.document_ids))
+        elif bulk.action == "unfavorite":
+            cursor.execute(f"UPDATE documents SET is_favorite = 0 WHERE id IN ({placeholders})", tuple(bulk.document_ids))
+        elif bulk.action == "categorize":
+            if not bulk.category:
+                raise HTTPException(status_code=400, detail="Category must be specified for categorize action.")
+            cursor.execute(f"UPDATE documents SET category = ? WHERE id IN ({placeholders})", (bulk.category, *bulk.document_ids))
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported bulk action: {bulk.action}")
+
+        conn.commit()
+        return {"status": "success", "action": bulk.action, "count": len(bulk.document_ids)}
 
 @router.get("/{doc_id}", response_model=DocumentDetailResponse)
 def get_document(doc_id: str):
@@ -305,6 +347,15 @@ def update_document(doc_id: str, doc: DocumentUpdate, current_user: Dict[str, An
             chunks = range(cursor.fetchone()["cnt"])
 
         recompute_document_edges(conn, doc_id)
+
+        # Record new version snapshot
+        new_version = int(existing["version"] or 1) + 1
+        version_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO document_versions (id, document_id, version_number, title, content)
+            VALUES (?, ?, ?, ?, ?)
+        """, (version_id, doc_id, new_version, title, content))
+
         log_activity(conn, str(existing["workspace_id"]), current_user["id"], "Updated Document", f'Updated "{title}"')
         conn.commit()
 
@@ -408,3 +459,132 @@ def export_document(doc_id: str, format: str = Query("md", pattern="^(md|json)$"
                 media_type="text/markdown",
                 headers={"Content-Disposition": f'attachment; filename="{title_slug}.md"'}
             )
+
+@router.get("/{doc_id}/versions", response_model=List[DocumentVersionResponse])
+def get_document_versions(doc_id: str):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
+        doc = cursor.fetchone()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found.")
+
+        cursor.execute("""
+            SELECT id, document_id, version_number, title, content, created_at
+            FROM document_versions
+            WHERE document_id = ?
+            ORDER BY version_number DESC
+        """, (doc_id,))
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            result.append(DocumentVersionResponse(
+                id=str(r["id"]),
+                document_id=str(r["document_id"]),
+                version_number=int(r["version_number"]),
+                title=str(r["title"]),
+                content=str(r["content"]),
+                created_at=str(r["created_at"])
+            ))
+        return result
+
+@router.post("/{doc_id}/restore-version/{version_num}", response_model=DocumentResponse)
+def restore_document_version(doc_id: str, version_num: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
+        existing = cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Document not found.")
+
+        cursor.execute("SELECT * FROM document_versions WHERE document_id = ? AND version_number = ?", (doc_id, version_num))
+        target_ver = cursor.fetchone()
+        if not target_ver:
+            raise HTTPException(status_code=404, detail=f"Version {version_num} not found.")
+
+        new_version = int(existing["version"] or 1) + 1
+        new_title = str(target_ver["title"])
+        new_content = str(target_ver["content"])
+        new_category = str(existing["category"] or "General")
+        new_tags = str(existing["tags"] or "[]")
+        new_size = len(new_content.encode("utf-8"))
+
+        cursor.execute("""
+            UPDATE documents
+            SET title = ?, content = ?, category = ?, tags = ?, file_size = ?,
+                version = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (new_title, new_content, new_category, new_tags, new_size, new_version, doc_id))
+
+        # Record new version snapshot for the restore
+        v_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO document_versions (id, document_id, version_number, title, content)
+            VALUES (?, ?, ?, ?, ?)
+        """, (v_id, doc_id, new_version, new_title, new_content))
+
+        # Recompute chunks & embeddings
+        cursor.execute("DELETE FROM document_chunks WHERE document_id = ?", (doc_id,))
+        chunks = chunk_text(new_content)
+        for c in chunks:
+            chunk_id = str(uuid.uuid4())
+            emb = vector_engine.embed(c["content"])
+            cursor.execute("""
+                INSERT INTO document_chunks (id, document_id, chunk_index, content, embedding)
+                VALUES (?, ?, ?, ?, ?)
+            """, (chunk_id, doc_id, c["index"], c["content"], json.dumps(emb)))
+
+        recompute_document_edges(conn, doc_id)
+        log_activity(conn, str(existing["workspace_id"]), current_user["id"], "Restored Version", f'Restored "{new_title}" to version {version_num}')
+        conn.commit()
+
+        cursor.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
+        updated = cursor.fetchone()
+        return DocumentResponse(
+            id=str(updated["id"]),
+            workspace_id=str(updated["workspace_id"]),
+            title=str(updated["title"]),
+            content=str(updated["content"]),
+            category=str(updated["category"]),
+            tags=parse_tags(updated["tags"]),
+            file_type=str(updated["file_type"]),
+            file_size=int(updated["file_size"]),
+            is_favorite=int(updated["is_favorite"]),
+            is_archived=int(updated["is_archived"]),
+            is_trash=int(updated["is_trash"]),
+            created_at=str(updated["created_at"]),
+            updated_at=str(updated["updated_at"]),
+            chunk_count=len(chunks)
+        )
+
+@router.post("/{doc_id}/compare", response_model=DocumentDiffResponse)
+def compare_document_versions(doc_id: str, req: DocumentDiffRequest):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM document_versions WHERE document_id = ? AND version_number = ?", (doc_id, req.version_a))
+        va = cursor.fetchone()
+        cursor.execute("SELECT * FROM document_versions WHERE document_id = ? AND version_number = ?", (doc_id, req.version_b))
+        vb = cursor.fetchone()
+
+        if not va or not vb:
+            raise HTTPException(status_code=404, detail="One or both versions not found for comparison.")
+
+        lines_a = str(va["content"]).splitlines(keepends=True)
+        lines_b = str(vb["content"]).splitlines(keepends=True)
+        diff_lines = list(difflib.unified_diff(
+            lines_a, lines_b,
+            fromfile=f"v{req.version_a} ({va['title']})",
+            tofile=f"v{req.version_b} ({vb['title']})"
+        ))
+        diff_text = "".join(diff_lines)
+        additions = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
+        deletions = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+
+        return DocumentDiffResponse(
+            document_id=doc_id,
+            version_a=req.version_a,
+            version_b=req.version_b,
+            diff_text=diff_text,
+            additions=additions,
+            deletions=deletions
+        )

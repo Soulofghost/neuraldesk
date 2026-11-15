@@ -112,3 +112,68 @@ def ask_question(payload: QuestionAnsweringRequest):
         citations=res["citations"],
         confidence=res["confidence"]
     )
+
+@router.post("/timeline")
+def extract_timeline(payload: SummarizeRequest):
+    text = ""
+    if payload.document_id:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT content FROM documents WHERE id = ?", (payload.document_id,))
+            doc = cursor.fetchone()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found.")
+            text = doc["content"]
+    elif payload.content:
+        text = payload.content
+    else:
+        raise HTTPException(status_code=400, detail="Provide either document_id or content.")
+
+    timeline = intelligence_engine.extract_timeline(text)
+    return {"timeline": timeline, "count": len(timeline)}
+
+@router.post("/classify")
+def classify_document(payload: SummarizeRequest):
+    text = ""
+    if payload.document_id:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT content FROM documents WHERE id = ?", (payload.document_id,))
+            doc = cursor.fetchone()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found.")
+            text = doc["content"]
+    elif payload.content:
+        text = payload.content
+    else:
+        raise HTTPException(status_code=400, detail="Provide either document_id or content.")
+
+    classification = intelligence_engine.classify_document(text)
+    return classification
+
+@router.post("/compare-documents")
+def compare_two_documents(payload: Dict[str, Any]):
+    doc_a_id = payload.get("document_id_a")
+    doc_b_id = payload.get("document_id_b")
+    text_a = payload.get("text_a", "")
+    text_b = payload.get("text_b", "")
+
+    if doc_a_id or doc_b_id:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            if doc_a_id:
+                cursor.execute("SELECT content FROM documents WHERE id = ?", (doc_a_id,))
+                row = cursor.fetchone()
+                if row:
+                    text_a = row["content"]
+            if doc_b_id:
+                cursor.execute("SELECT content FROM documents WHERE id = ?", (doc_b_id,))
+                row = cursor.fetchone()
+                if row:
+                    text_b = row["content"]
+
+    if not text_a or not text_b:
+        raise HTTPException(status_code=400, detail="Provide either valid document IDs or text_a and text_b.")
+
+    comparison = intelligence_engine.compare_documents(text_a, text_b)
+    return comparison

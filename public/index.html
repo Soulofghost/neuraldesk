@@ -120,6 +120,7 @@
                 <nav class="view-toggles" id="view-toggles-nav" aria-label="Main Navigation">
                     <button id="tab-dashboard" class="tab-btn">Dashboard</button>
                     <button id="tab-doc" class="tab-btn active">Documents</button>
+                    <button id="tab-storage" class="tab-btn">Cloud Storage</button>
                     <button id="tab-chat" class="tab-btn">AI Assistant</button>
                     <button id="tab-graph" class="tab-btn tab-collapsible-desktop">Graph</button>
                     <button id="tab-notes" class="tab-btn tab-collapsible-wide">Notes</button>
@@ -134,6 +135,7 @@
                             </svg>
                         </button>
                         <div id="nav-more-menu" class="nav-more-menu">
+                            <button type="button" class="nav-menu-item tab-menu-item item-show-compact" data-tab-id="tab-storage">Cloud Storage</button>
                             <button type="button" class="nav-menu-item tab-menu-item item-show-compact" data-tab-id="tab-graph">Concept Graph</button>
                             <button type="button" class="nav-menu-item tab-menu-item item-show-compact" data-tab-id="tab-notes">Notes</button>
                             <button type="button" class="nav-menu-item tab-menu-item item-show-compact" data-tab-id="tab-tasks">Tasks</button>
@@ -260,6 +262,7 @@
                         <input type="text" id="doc-title-input" class="doc-title-field" placeholder="Untitled Document..." autocomplete="off">
                         <div class="metadata-actions">
                             <button id="btn-fav-doc" class="btn-action" title="Toggle Favorite">★ Fav</button>
+                            <button id="btn-doc-versions" class="btn-action" title="Version History &amp; Diff">🕒 Versions</button>
                             <button id="btn-ai-intel" class="btn-action" title="AI Document Intelligence">⚡ AI Summary</button>
                             <button id="btn-share-doc" class="btn-action" title="Create shareable link">🔗 Share</button>
                             <button id="btn-export-doc" class="btn-action" style="display:none;" title="Download Markdown">Export .MD</button>
@@ -316,6 +319,163 @@
                                 <input type="text" id="doc-comment-input" placeholder="Add a team comment or note...">
                                 <button id="btn-submit-comment" class="btn-secondary btn-sm">Post</button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CLOUD STORAGE SYSTEM & FILE MANAGER PANE -->
+            <section id="storage-pane" class="workspace-pane">
+                <div class="storage-container">
+                    <!-- Storage Header & Cloudflare R2 Status -->
+                    <div class="storage-header-banner">
+                        <div>
+                            <div class="storage-title-row">
+                                <h2 class="storage-greeting">Cloud Storage &amp; Asset Intelligence</h2>
+                                <span id="storage-provider-badge" class="provider-badge provider-local">Local Fallback</span>
+                            </div>
+                            <p class="storage-subtitle">S3-compatible object storage powered by Cloudflare R2 with direct browser presigned uploads</p>
+                        </div>
+                        <div class="storage-header-actions">
+                            <button id="btn-storage-create-folder" class="btn-secondary">+ New Folder</button>
+                            <button id="btn-storage-trigger-upload" class="btn-primary">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                Upload File
+                            </button>
+                            <input type="file" id="storage-file-input" multiple style="display:none;">
+                        </div>
+                    </div>
+
+                    <!-- Telemetry & Capacity Cards -->
+                    <div class="stats-grid storage-stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon storage-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Capacity Used</span>
+                                <span class="stat-value" id="storage-stat-used">0 MB</span>
+                                <div class="storage-progress-bar"><div id="storage-progress-fill" class="storage-progress-fill" style="width: 0%;"></div></div>
+                                <span class="stat-subtext" id="storage-stat-capacity">0% of 500 MB quota</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon docs-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Total Files</span>
+                                <span class="stat-value" id="storage-stat-files">0</span>
+                                <span class="stat-subtext" id="storage-stat-trash">0 in Trash</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon notes-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Active Folders</span>
+                                <span class="stat-value" id="storage-stat-folders">0</span>
+                                <span class="stat-subtext">Nested Directory Tree</span>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon chunks-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                            </div>
+                            <div class="stat-details">
+                                <span class="stat-title">Storage Target</span>
+                                <span class="stat-value" id="storage-stat-provider">Local Fallback</span>
+                                <span class="stat-subtext" id="storage-stat-bucket">local-storage</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File Distribution Bar -->
+                    <div class="storage-distribution-panel">
+                        <div class="dist-header">
+                            <span class="dist-title">Storage Breakdown by File Category</span>
+                            <span id="storage-dist-summary" class="dist-summary">0 files across 0 categories</span>
+                        </div>
+                        <div class="dist-bar" id="storage-dist-bar"></div>
+                        <div class="dist-legend" id="storage-dist-legend"></div>
+                    </div>
+
+                    <!-- File Manager Workspace Layout -->
+                    <div class="storage-file-manager">
+                        <!-- Left: Folder Sidebar -->
+                        <div class="storage-folders-sidebar">
+                            <div class="folder-sidebar-header">
+                                <span>DIRECTORIES</span>
+                                <button id="btn-add-folder-quick" class="btn-icon" title="Create Folder">+</button>
+                            </div>
+                            <div class="storage-views-filter">
+                                <button class="folder-item active" data-view="all" data-folder="">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                                    <span>All Files</span>
+                                </button>
+                                <button class="folder-item" data-view="favorites">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                                    <span>Starred Files</span>
+                                </button>
+                                <button class="folder-item" data-view="trash">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                    <span>Trash Bin</span>
+                                </button>
+                            </div>
+                            <div class="folder-sidebar-section-title">FOLDERS</div>
+                            <div id="storage-folders-list" class="storage-folders-list"></div>
+                        </div>
+
+                        <!-- Right: File Explorer -->
+                        <div class="storage-explorer">
+                            <!-- Explorer Toolbar -->
+                            <div class="explorer-toolbar">
+                                <div class="explorer-breadcrumbs" id="storage-breadcrumbs">
+                                    <span class="crumb active" data-folder="">Root</span>
+                                </div>
+                                <div class="explorer-actions">
+                                    <input type="text" id="storage-search-input" class="storage-search-box" placeholder="Filter files...">
+                                    <select id="storage-sort-select" class="select-field storage-sort-dropdown">
+                                        <option value="date_desc">Newest First</option>
+                                        <option value="date_asc">Oldest First</option>
+                                        <option value="size_desc">Largest First</option>
+                                        <option value="name_asc">Name (A-Z)</option>
+                                    </select>
+                                    <div class="view-mode-toggle">
+                                        <button id="btn-storage-view-grid" class="btn-icon active" title="Grid View">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                                        </button>
+                                        <button id="btn-storage-view-list" class="btn-icon" title="List View">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Drag & Drop Upload Zone -->
+                            <div id="storage-dropzone" class="storage-dropzone">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                <span>Drag and drop files here to upload directly to Cloud Storage</span>
+                                <span class="dropzone-sub">Supports PDF, DOCX, TXT, Images, Audio, Video, Archives up to 100MB</span>
+                            </div>
+
+                            <!-- Upload Progress Queue -->
+                            <div id="storage-upload-queue" class="storage-upload-queue" style="display:none;"></div>
+
+                            <!-- File Grid / List Display -->
+                            <div id="storage-files-container" class="storage-files-grid"></div>
                         </div>
                     </div>
                 </div>
@@ -712,6 +872,102 @@
                     </select>
                 </div>
                 <button id="btn-submit-note" class="btn-primary" style="margin-top:16px;">Save Note</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Preview Modal -->
+    <div id="file-preview-modal" class="modal-overlay">
+        <div class="modal-window extra-wide">
+            <div class="modal-header">
+                <div class="preview-header-meta">
+                    <span id="preview-file-icon" class="file-icon-badge">📄</span>
+                    <h3 id="preview-file-title">File Preview</h3>
+                    <span id="preview-file-size" class="preview-badge-sub">0 KB</span>
+                </div>
+                <div class="modal-header-actions">
+                    <a id="preview-download-btn" class="btn-secondary btn-sm" download target="_blank">Download</a>
+                    <button id="btn-close-preview-modal" class="btn-close" aria-label="Close modal">&times;</button>
+                </div>
+            </div>
+            <div id="file-preview-body" class="file-preview-content"></div>
+        </div>
+    </div>
+
+    <!-- File Share Modal -->
+    <div id="file-share-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3>Share Cloud Asset</h3>
+                <button id="btn-close-file-share-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Generate a secure, tokenized public link for this file:</p>
+                <div class="form-group" style="margin-bottom:12px;">
+                    <label>Link Expiration:</label>
+                    <select id="file-share-expiry-select" class="select-field">
+                        <option value="24">24 Hours</option>
+                        <option value="72" selected>3 Days (72 Hours)</option>
+                        <option value="168">7 Days</option>
+                        <option value="720">30 Days</option>
+                    </select>
+                </div>
+                <button id="btn-generate-file-share" class="btn-primary" style="margin-bottom:12px; width:100%;">Create Secure Share Link</button>
+                <div id="file-share-result" style="display:none;">
+                    <div class="share-input-group">
+                        <input type="text" id="file-share-url-input" readonly class="select-field">
+                        <button id="btn-copy-file-share" class="btn-primary">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Folder Modal -->
+    <div id="folder-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3>Create Directory Folder</h3>
+                <button id="btn-close-folder-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Folder Name:</label>
+                    <input type="text" id="folder-name-input" class="select-field" placeholder="e.g. Design Specs">
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                    <label>Color Tag:</label>
+                    <div class="folder-color-picker">
+                        <button type="button" class="color-swatch active" data-color="#e6a23c" style="background:#e6a23c;"></button>
+                        <button type="button" class="color-swatch" data-color="#38bdf8" style="background:#38bdf8;"></button>
+                        <button type="button" class="color-swatch" data-color="#22c55e" style="background:#22c55e;"></button>
+                        <button type="button" class="color-swatch" data-color="#a855f7" style="background:#a855f7;"></button>
+                        <button type="button" class="color-swatch" data-color="#ec4899" style="background:#ec4899;"></button>
+                        <button type="button" class="color-swatch" data-color="#f97316" style="background:#f97316;"></button>
+                    </div>
+                </div>
+                <button id="btn-submit-folder" class="btn-primary" style="margin-top:16px;">Create Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Document Version History & Diff Modal -->
+    <div id="version-history-modal" class="modal-overlay">
+        <div class="modal-window wide">
+            <div class="modal-header">
+                <h3>Document Version History &amp; Diff</h3>
+                <button id="btn-close-versions-modal" class="btn-close" aria-label="Close modal">&times;</button>
+            </div>
+            <div class="modal-body-scroll">
+                <div class="version-compare-bar">
+                    <span>Compare:</span>
+                    <select id="diff-version-a-select" class="select-field select-inline"></select>
+                    <span>vs</span>
+                    <select id="diff-version-b-select" class="select-field select-inline"></select>
+                    <button id="btn-run-diff" class="btn-secondary btn-sm">Compare Revisions</button>
+                </div>
+                <div id="diff-viewer-container" class="diff-viewer" style="display:none;"></div>
+                <div id="doc-versions-list" class="doc-versions-timeline" style="margin-top:16px;"></div>
             </div>
         </div>
     </div>
