@@ -166,15 +166,19 @@ function switchWorkspace(id) {
    ========================================================== */
 function setupNavigationTabs() {
     const tabs = [
-        { btn: "tab-dashboard", pane: "dashboard-pane", onActive: loadDashboardStats },
-        { btn: "tab-doc", pane: "doc-pane", onActive: null },
-        { btn: "tab-chat", pane: "chat-pane", onActive: loadChatConversations },
-        { btn: "tab-notes", pane: "notes-pane", onActive: loadNotes },
-        { btn: "tab-tasks", pane: "tasks-pane", onActive: loadTasks },
-        { btn: "tab-graph", pane: "graph-pane", onActive: renderKnowledgeGraph },
-        { btn: "tab-analytics", pane: "analytics-pane", onActive: loadDashboardStats },
-        { btn: "tab-settings", pane: "settings-pane", onActive: null }
+        { btn: "tab-dashboard", pane: "dashboard-pane", onActive: loadDashboardStats, label: "Dashboard", isMore: false },
+        { btn: "tab-doc", pane: "doc-pane", onActive: null, label: "Documents", isMore: false },
+        { btn: "tab-chat", pane: "chat-pane", onActive: loadChatConversations, label: "AI Assistant", isMore: false },
+        { btn: "tab-graph", pane: "graph-pane", onActive: renderKnowledgeGraph, label: "Graph", isMore: true },
+        { btn: "tab-notes", pane: "notes-pane", onActive: loadNotes, label: "Notes", isMore: true },
+        { btn: "tab-tasks", pane: "tasks-pane", onActive: loadTasks, label: "Tasks", isMore: true },
+        { btn: "tab-analytics", pane: "analytics-pane", onActive: loadDashboardStats, label: "Analytics", isMore: true },
+        { btn: "tab-settings", pane: "settings-pane", onActive: null, label: "Settings", isMore: true }
     ];
+
+    const btnNavMore = document.getElementById("btn-nav-more");
+    const navMoreMenu = document.getElementById("nav-more-menu");
+    const navMoreLabel = document.getElementById("nav-more-label");
 
     tabs.forEach(t => {
         const btnElem = document.getElementById(t.btn);
@@ -189,11 +193,71 @@ function setupNavigationTabs() {
                 if (p) p.classList.remove("active");
             });
 
+            // Remove active from any dropdown items
+            document.querySelectorAll(".nav-menu-item").forEach(item => item.classList.remove("active"));
+
             btnElem.classList.add("active");
             paneElem.classList.add("active");
+
+            // Update More button state
+            if (btnNavMore && navMoreLabel) {
+                if (t.isMore) {
+                    btnNavMore.classList.add("active");
+                    navMoreLabel.textContent = t.label;
+                } else {
+                    btnNavMore.classList.remove("active");
+                    navMoreLabel.textContent = "More";
+                }
+            }
+
+            if (navMoreMenu) navMoreMenu.classList.remove("open");
             if (t.onActive) t.onActive();
         });
     });
+
+    // Handle More dropdown toggle
+    if (btnNavMore && navMoreMenu) {
+        btnNavMore.addEventListener("click", (e) => {
+            e.stopPropagation();
+            navMoreMenu.classList.toggle("open");
+        });
+
+        // Close on outside click
+        document.addEventListener("click", (e) => {
+            if (!e.target.closest("#nav-more-dropdown")) {
+                navMoreMenu.classList.remove("open");
+            }
+        });
+    }
+
+    // Handle compact menu item clicks (that forward to tab buttons)
+    document.querySelectorAll(".tab-menu-item[data-tab-id]").forEach(item => {
+        item.addEventListener("click", () => {
+            const targetId = item.dataset.tabId;
+            const targetBtn = document.getElementById(targetId);
+            if (targetBtn) {
+                targetBtn.click();
+            }
+        });
+    });
+
+    // Drawer collapse / expand toggle
+    const btnToggleDrawer = document.getElementById("btn-toggle-drawer");
+    const docDrawer = document.getElementById("doc-drawer");
+    if (btnToggleDrawer && docDrawer) {
+        btnToggleDrawer.addEventListener("click", () => {
+            docDrawer.classList.toggle("collapsed");
+        });
+    }
+
+    // Mobile Chat Sidebar toggle
+    const btnToggleChatSidebar = document.getElementById("btn-toggle-chat-sidebar");
+    const chatSidebar = document.getElementById("chat-sidebar");
+    if (btnToggleChatSidebar && chatSidebar) {
+        btnToggleChatSidebar.addEventListener("click", () => {
+            chatSidebar.classList.toggle("mobile-open");
+        });
+    }
 
     // Dashboard Quick Actions
     const dashNewDoc = document.getElementById("dash-btn-new-doc");
