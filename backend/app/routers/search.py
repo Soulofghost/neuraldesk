@@ -7,6 +7,17 @@ from app.engine.embeddings import vector_engine
 
 router = APIRouter(prefix="/search", tags=["Search"])
 
+def _parse_embedding(raw_emb) -> List[float]:
+    if isinstance(raw_emb, list):
+        return raw_emb
+    if isinstance(raw_emb, str):
+        try:
+            parsed = json.loads(raw_emb)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
 @router.post("", response_model=List[SearchResultItem])
 def hybrid_search(payload: SearchQuery):
     query_vector = vector_engine.embed(payload.query)
@@ -31,11 +42,11 @@ def hybrid_search(payload: SearchQuery):
         
         scored_results = []
         for r in rows:
-            chunk_embedding = json.loads(r["embedding"]) if r["embedding"] else []
+            chunk_embedding = _parse_embedding(r["embedding"]) if r["embedding"] else []
             vector_sim = vector_engine.cosine_similarity(query_vector, chunk_embedding)
             
             # Lexical overlap score
-            chunk_lower = r["content"].lower()
+            chunk_lower = str(r["content"]).lower()
             term_hits = sum(1 for term in query_terms if term in chunk_lower)
             lexical_score = (term_hits / len(query_terms)) if query_terms else 0.0
             
@@ -44,12 +55,12 @@ def hybrid_search(payload: SearchQuery):
             
             if combined_score > 0.05:
                 scored_results.append(SearchResultItem(
-                    document_id=r["document_id"],
-                    document_title=r["doc_title"],
-                    chunk_index=r["chunk_index"],
-                    content=r["content"],
+                    document_id=str(r["document_id"]),
+                    document_title=str(r["doc_title"]),
+                    chunk_index=int(r["chunk_index"]),
+                    content=str(r["content"]),
                     score=round(combined_score, 4),
-                    category=r["doc_category"]
+                    category=str(r["doc_category"])
                 ))
                 
         scored_results.sort(key=lambda x: x.score, reverse=True)

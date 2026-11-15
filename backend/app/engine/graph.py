@@ -1,10 +1,31 @@
-import sqlite3
 import json
-from typing import List, Dict
+from typing import List, Dict, Any
 from app.engine.embeddings import vector_engine
 from app.config import SIMILARITY_THRESHOLD
 
-def recompute_document_edges(conn: sqlite3.Connection, doc_id: str):
+def _extract_tags(raw_tags) -> set:
+    if isinstance(raw_tags, list):
+        return set(raw_tags)
+    if isinstance(raw_tags, str):
+        try:
+            parsed = json.loads(raw_tags)
+            return set(parsed) if isinstance(parsed, list) else set()
+        except Exception:
+            return set()
+    return set()
+
+def _extract_embedding(raw_emb) -> List[float]:
+    if isinstance(raw_emb, list):
+        return raw_emb
+    if isinstance(raw_emb, str):
+        try:
+            parsed = json.loads(raw_emb)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+def recompute_document_edges(conn: Any, doc_id: str):
     cursor = conn.cursor()
     
     # Remove existing edges connected to this doc
@@ -16,7 +37,7 @@ def recompute_document_edges(conn: sqlite3.Connection, doc_id: str):
     if not current_doc:
         return
     
-    current_tags = set(json.loads(current_doc["tags"]))
+    current_tags = _extract_tags(current_doc["tags"])
     
     # Fetch embedding for current doc chunks (average pooling)
     cursor.execute("SELECT embedding FROM document_chunks WHERE document_id = ?", (doc_id,))
@@ -28,7 +49,7 @@ def recompute_document_edges(conn: sqlite3.Connection, doc_id: str):
     valid_chunks = 0
     for r in chunk_rows:
         if r["embedding"]:
-            emb = json.loads(r["embedding"])
+            emb = _extract_embedding(r["embedding"])
             for i in range(len(emb)):
                 avg_vector[i] += emb[i]
             valid_chunks += 1
@@ -42,7 +63,7 @@ def recompute_document_edges(conn: sqlite3.Connection, doc_id: str):
     
     for other in other_docs:
         other_id = other["id"]
-        other_tags = set(json.loads(other["tags"]))
+        other_tags = _extract_tags(other["tags"])
         
         # Check tag overlap
         tag_overlap = len(current_tags.intersection(other_tags))
@@ -54,7 +75,7 @@ def recompute_document_edges(conn: sqlite3.Connection, doc_id: str):
         o_valid = 0
         for orow in o_chunk_rows:
             if orow["embedding"]:
-                o_emb = json.loads(orow["embedding"])
+                o_emb = _extract_embedding(orow["embedding"])
                 for i in range(len(o_emb)):
                     o_avg[i] += o_emb[i]
                 o_valid += 1
@@ -72,7 +93,7 @@ def recompute_document_edges(conn: sqlite3.Connection, doc_id: str):
                 VALUES (?, ?, ?, ?, ?)
             """, (edge_id, min(doc_id, other_id), max(doc_id, other_id), round(total_weight, 3), relation))
 
-def get_graph_data(conn: sqlite3.Connection) -> Dict[str, List]:
+def get_graph_data(conn: Any) -> Dict[str, List]:
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, category FROM documents")
     docs = cursor.fetchall()
@@ -83,19 +104,22 @@ def get_graph_data(conn: sqlite3.Connection) -> Dict[str, List]:
     nodes = []
     for d in docs:
         nodes.append({
-            "id": d["id"],
-            "label": d["title"],
-            "category": d["category"],
+            "id": str(d["id"]),
+            "label": str(d["title"]),
+            "category": str(d["category"]),
             "size": 18
         })
         
     edge_list = []
     for e in edges:
         edge_list.append({
-            "source": e["source_id"],
-            "target": e["target_id"],
-            "weight": e["weight"],
-            "relation": e["relation_type"]
+            "source": str(e["source_id"]),
+            "target": str(e["target_id"]),
+            "weight": float(e["weight"]),
+            "relation": str(e["relation_type"])
         })
         
-    return {"nodes": nodes, "edges": edge_list}
+    return {
+        "nodes": nodes,
+        "edges": edge_list
+    }

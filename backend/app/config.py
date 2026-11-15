@@ -6,6 +6,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
+# Database Configuration (PostgreSQL / Neon / Supabase or local SQLite)
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
+
 def get_db_path() -> str:
     # 1. Explicit environment variable override
     if os.environ.get("DB_PATH"):

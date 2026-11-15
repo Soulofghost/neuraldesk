@@ -1,7 +1,6 @@
 import uuid
 import json
-import sqlite3
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from typing import List
 from app.database import get_db_connection
 from app.schemas import DocumentCreate, DocumentUpdate, DocumentResponse
@@ -10,6 +9,17 @@ from app.engine.embeddings import vector_engine
 from app.engine.graph import recompute_document_edges
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+def parse_tags(raw_tags) -> List[str]:
+    if isinstance(raw_tags, list):
+        return raw_tags
+    if isinstance(raw_tags, str):
+        try:
+            parsed = json.loads(raw_tags)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
 
 @router.get("", response_model=List[DocumentResponse])
 def list_documents():
@@ -20,21 +30,21 @@ def list_documents():
                    COUNT(c.id) as chunk_count
             FROM documents d
             LEFT JOIN document_chunks c ON d.id = c.document_id
-            GROUP BY d.id
+            GROUP BY d.id, d.title, d.content, d.category, d.tags, d.created_at, d.updated_at
             ORDER BY d.updated_at DESC
         """)
         rows = cursor.fetchall()
         result = []
         for r in rows:
             result.append(DocumentResponse(
-                id=r["id"],
-                title=r["title"],
-                content=r["content"],
-                category=r["category"],
-                tags=json.loads(r["tags"]),
-                created_at=r["created_at"],
-                updated_at=r["updated_at"],
-                chunk_count=r["chunk_count"]
+                id=str(r["id"]),
+                title=str(r["title"]),
+                content=str(r["content"]),
+                category=str(r["category"]),
+                tags=parse_tags(r["tags"]),
+                created_at=str(r["created_at"]),
+                updated_at=str(r["updated_at"]),
+                chunk_count=int(r["chunk_count"])
             ))
         return result
 
@@ -67,13 +77,13 @@ def create_document(doc: DocumentCreate):
         saved = cursor.fetchone()
         
         return DocumentResponse(
-            id=saved["id"],
-            title=saved["title"],
-            content=saved["content"],
-            category=saved["category"],
-            tags=json.loads(saved["tags"]),
-            created_at=saved["created_at"],
-            updated_at=saved["updated_at"],
+            id=str(saved["id"]),
+            title=str(saved["title"]),
+            content=str(saved["content"]),
+            category=str(saved["category"]),
+            tags=parse_tags(saved["tags"]),
+            created_at=str(saved["created_at"]),
+            updated_at=str(saved["updated_at"]),
             chunk_count=len(chunks)
         )
 
@@ -102,15 +112,15 @@ def get_document(doc_id: str):
         relations = cursor.fetchall()
         
         return {
-            "id": doc["id"],
-            "title": doc["title"],
-            "content": doc["content"],
-            "category": doc["category"],
-            "tags": json.loads(doc["tags"]),
-            "created_at": doc["created_at"],
-            "updated_at": doc["updated_at"],
+            "id": str(doc["id"]),
+            "title": str(doc["title"]),
+            "content": str(doc["content"]),
+            "category": str(doc["category"]),
+            "tags": parse_tags(doc["tags"]),
+            "created_at": str(doc["created_at"]),
+            "updated_at": str(doc["updated_at"]),
             "chunks": [{"index": c["chunk_index"], "content": c["content"]} for c in chunks],
-            "related": [{"id": r["related_id"], "title": r["related_title"], "weight": r["weight"], "type": r["relation_type"]} for r in relations]
+            "related": [{"id": str(r["related_id"]), "title": str(r["related_title"]), "weight": float(r["weight"]), "type": str(r["relation_type"])} for r in relations]
         }
 
 @router.put("/{doc_id}", response_model=DocumentResponse)
@@ -155,13 +165,13 @@ def update_document(doc_id: str, doc: DocumentUpdate):
         updated = cursor.fetchone()
         
         return DocumentResponse(
-            id=updated["id"],
-            title=updated["title"],
-            content=updated["content"],
-            category=updated["category"],
-            tags=json.loads(updated["tags"]),
-            created_at=updated["created_at"],
-            updated_at=updated["updated_at"],
+            id=str(updated["id"]),
+            title=str(updated["title"]),
+            content=str(updated["content"]),
+            category=str(updated["category"]),
+            tags=parse_tags(updated["tags"]),
+            created_at=str(updated["created_at"]),
+            updated_at=str(updated["updated_at"]),
             chunk_count=len(chunks)
         )
 

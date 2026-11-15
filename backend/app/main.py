@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from pathlib import Path
-from app.database import init_db
+from app.database import init_db, is_postgres_configured
 from app.routers import documents, search, graph
 
 app = FastAPI(
@@ -33,16 +33,21 @@ app.include_router(graph.router, prefix="/api/v1")
 
 @app.get("/api/v1/health")
 def health_check():
+    db_engine = "postgresql" if is_postgres_configured() else "sqlite"
     return {
         "status": "healthy",
         "service": "NeuralDesk Knowledge Engine",
         "version": "1.0.0",
-        "database": "active"
+        "database": f"{db_engine}_active"
     }
 
 @app.get("/api/docs", include_in_schema=False)
 def api_docs_redirect():
     return RedirectResponse(url="/docs")
+
+@app.get("/api/openapi.json", include_in_schema=False)
+def api_openapi_redirect():
+    return RedirectResponse(url="/openapi.json")
 
 # Mount static frontend when running locally (on Vercel, static assets are served from public/)
 if not os.environ.get("VERCEL"):

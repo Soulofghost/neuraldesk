@@ -228,7 +228,9 @@ vercel
 #### Vercel Serverless Architecture Highlights:
 - **Zero-Cold-Start Static Serving:** Pure HTML5/CSS3 assets in `public/` are served from Vercel's global Edge Network.
 - **Dynamic Serverless API:** All `/api/v1/*` routes and `/docs` are rewritten to `api/index.py` using Python 3.12 runtime.
-- **Serverless SQLite Engine:** Automatically adapts SQLite persistence to `/tmp` in serverless runtimes with automated database seeding.
+- **Dual Persistence Architecture:**
+  - **Zero-Setup Serverless SQLite:** By default, NeuralDesk mounts SQLite in `/tmp` with automated table initialization and seed data.
+  - **Production PostgreSQL (Neon / Supabase):** For persistent production storage on Vercel, set the `DATABASE_URL` environment variable (e.g., from Neon or Supabase). The application automatically switches to PostgreSQL with unified schema, query translation, and transaction management.
 
 ---
 
