@@ -1,19 +1,40 @@
 import os
-from fastapi import FastAPI
+import logging
+from pathlib import Path
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-from pathlib import Path
-from app.database import init_db, is_postgres_configured
+from fastapi.responses import RedirectResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from app.database import init_db, is_postgres_configured, get_db_connection
 from app.routers import documents, search, graph
+from app.schemas import SystemStats
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("neuraldesk")
 
 app = FastAPI(
     title="NeuralDesk API",
-    description="AI-Powered Knowledge Management Platform with Semantic Search & Graph Relationships",
-    version="1.0.0",
+    description="AI-Powered Knowledge Management Platform with Subword Vector Retrieval & Graph Topology",
+    version="1.1.0",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
+
+# Security Headers Middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +43,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global Exception Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal server error occurred. Please verify your request parameters."}
+    )
 
 # Initialize database schema
 init_db()
@@ -37,9 +67,32 @@ def health_check():
     return {
         "status": "healthy",
         "service": "NeuralDesk Knowledge Engine",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "database": f"{db_engine}_active"
     }
+
+@app.get("/api/v1/stats", response_model=SystemStats)
+def system_stats():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT count(*) as cnt FROM documents")
+        doc_count = cursor.fetchone()["cnt"]
+        
+        cursor.execute("SELECT count(*) as cnt FROM document_chunks")
+        chunk_count = cursor.fetchone()["cnt"]
+        
+        cursor.execute("SELECT count(*) as cnt FROM graph_edges")
+        edge_count = cursor.fetchone()["cnt"]
+        
+        db_engine = "PostgreSQL (Neon/Supabase)" if is_postgres_configured() else "SQLite WAL"
+        return SystemStats(
+            total_documents=int(doc_count),
+            total_chunks=int(chunk_count),
+            total_edges=int(edge_count),
+            database_engine=db_engine,
+            version="1.1.0",
+            status="operational"
+        )
 
 @app.get("/api/docs", include_in_schema=False)
 def api_docs_redirect():

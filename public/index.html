@@ -10,19 +10,35 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
     <div class="app-layout">
         <!-- Sidebar Navigation -->
-        <aside class="sidebar">
+        <aside id="app-sidebar" class="sidebar">
             <div class="brand">
                 <div class="brand-glyph">ND</div>
                 <div class="brand-text">
                     <span class="brand-title">NeuralDesk</span>
                     <span class="brand-subtitle">Knowledge Graph Engine</span>
                 </div>
+                <button id="btn-close-sidebar" class="btn-close-sidebar" aria-label="Close sidebar">&times;</button>
             </div>
 
             <div class="sidebar-action">
                 <button id="btn-new-doc" class="btn-primary">+ New Document</button>
+                <button id="btn-upload-doc" class="btn-secondary" title="Upload Markdown, Text, or JSON document">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Import File
+                </button>
+                <input type="file" id="file-upload-input" accept=".md,.txt,.markdown,.json" style="display: none;">
             </div>
 
             <div class="category-filter">
@@ -49,7 +65,7 @@
             <div class="sidebar-footer">
                 <div class="status-indicator">
                     <span class="dot live"></span>
-                    <span class="status-label">SQLite WAL • Vector Index Active</span>
+                    <span id="system-status-label" class="status-label">Engine Ready • Initializing...</span>
                 </div>
             </div>
         </aside>
@@ -57,13 +73,20 @@
         <!-- Main Workspace -->
         <main class="main-workspace">
             <header class="workspace-header">
+                <button id="btn-toggle-sidebar" class="btn-hamburger" aria-label="Open sidebar">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                </button>
                 <div class="header-search">
-                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg id="btn-trigger-search" class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="cursor: pointer;">
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
                     <input type="text" id="hybrid-search-input" placeholder="Hybrid semantic search across knowledge base (e.g. 'consensus algorithms', 'memory caching')...">
-                    <span class="search-hint">Enter to query</span>
+                    <span class="search-hint">Ctrl+K</span>
                 </div>
                 <div class="view-toggles">
                     <button id="tab-doc" class="tab-btn active">Document View</button>
@@ -84,12 +107,13 @@
                         </select>
                         <input type="text" id="doc-tags-input" class="tags-field" placeholder="tags (comma separated)">
                         <button id="btn-save-doc" class="btn-save">Save & Index</button>
+                        <button id="btn-export-doc" class="btn-export" style="display:none;" title="Download Markdown">Export .MD</button>
                         <button id="btn-delete-doc" class="btn-delete" style="display:none;">Delete</button>
                     </div>
                 </div>
 
                 <div class="editor-container">
-                    <textarea id="doc-content-input" class="doc-editor" placeholder="Write markdown content or document documentation here... NeuralDesk automatically computes overlapping semantic chunks and graph relations on save."></textarea>
+                    <textarea id="doc-content-input" class="doc-editor" placeholder="Write markdown content or document documentation here... NeuralDesk automatically computes overlapping semantic chunks and graph relations on save. (You can also drop .md or .txt files directly here!)"></textarea>
                 </div>
 
                 <div class="doc-drawer">
@@ -106,11 +130,15 @@
             <!-- Graph Canvas Pane -->
             <section id="graph-pane" class="workspace-pane">
                 <div class="graph-toolbar">
-                    <span class="graph-legend"><span class="legend-dot arc"></span>Architecture</span>
-                    <span class="graph-legend"><span class="legend-dot eng"></span>Engineering</span>
-                    <span class="graph-legend"><span class="legend-dot res"></span>Research</span>
-                    <span class="graph-legend"><span class="legend-dot gen"></span>General</span>
-                    <button id="btn-refresh-graph" class="btn-subtle">Recalculate Topology</button>
+                    <div class="graph-legends">
+                        <span class="graph-legend"><span class="legend-dot arc"></span>Architecture</span>
+                        <span class="graph-legend"><span class="legend-dot eng"></span>Engineering</span>
+                        <span class="graph-legend"><span class="legend-dot res"></span>Research</span>
+                        <span class="graph-legend"><span class="legend-dot gen"></span>General</span>
+                    </div>
+                    <div class="graph-actions">
+                        <button id="btn-refresh-graph" class="btn-subtle">Recalculate Topology</button>
+                    </div>
                 </div>
                 <div class="graph-canvas-wrapper">
                     <svg id="graph-svg" class="graph-canvas" width="100%" height="100%"></svg>
@@ -124,7 +152,7 @@
         <div class="modal-window">
             <div class="modal-header">
                 <h3>Hybrid Search Results</h3>
-                <button id="btn-close-modal" class="btn-close">&times;</button>
+                <button id="btn-close-modal" class="btn-close" aria-label="Close modal">&times;</button>
             </div>
             <div id="search-results-list" class="results-container">
                 <!-- Search results injected here -->

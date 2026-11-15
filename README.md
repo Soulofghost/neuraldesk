@@ -170,16 +170,20 @@ Database schema initialization is executed automatically on startup via `init_db
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/v1/health` | Service health status and database mode |
-| `GET` | `/api/v1/documents` | List all indexed documents with chunk statistics |
-| `POST` | `/api/v1/documents` | Create document, calculate chunks and embeddings |
-| `GET` | `/api/v1/documents/{id}`| Fetch document, chunks, and relational backlinks |
-| `PUT` | `/api/v1/documents/{id}`| Update document content and recalculate vector index |
-| `DELETE` | `/api/v1/documents/{id}`| Remove document and prune graph edges |
-| `POST` | `/api/v1/search` | Execute hybrid semantic and lexical search |
-| `GET` | `/api/v1/graph` | Retrieve nodes and weighted edges for canvas |
+| `GET` | `/api/v1/health` | Service health status and database engine telemetry |
+| `GET` | `/api/v1/stats` | Real-time system telemetry (counts of documents, chunks, graph edges) |
+| `GET` | `/api/v1/documents` | List indexed documents with chunk statistics and optional category filter |
+| `POST` | `/api/v1/documents` | Create document, calculate semantic chunks and vector embeddings |
+| `POST` | `/api/v1/documents/upload` | Upload and ingest `.md`, `.txt`, `.json` file into knowledge base |
+| `GET` | `/api/v1/documents/{id}`| Fetch document, chunk vectors, and relational backlinks |
+| `GET` | `/api/v1/documents/{id}/export`| Export document as formatted Markdown (`.md`) or raw JSON |
+| `PUT` | `/api/v1/documents/{id}`| Update document content and recalculate vector index & graph edges |
+| `DELETE` | `/api/v1/documents/{id}`| Remove document and prune graph edges with cascade deletion |
+| `POST` | `/api/v1/search` | Execute hybrid semantic (70%) and lexical (30%) search |
+| `GET` | `/api/v1/graph` | Retrieve nodes and weighted edges for interactive SVG topology canvas |
+| `POST` | `/api/v1/graph/recompute` | Recalculate edge topology across all documents in knowledge base |
 
-Interactive OpenAPI documentation is accessible at `/docs`.
+Interactive OpenAPI documentation is accessible at `/docs` (and `/api/docs`).
 
 ---
 
@@ -196,9 +200,11 @@ pytest backend/tests/ -v
 
 ## 13. Security Considerations
 
-- **Input Sanitization:** All HTML and Markdown inputs are strictly escaped before DOM insertion.
-- **Parameterized SQL:** All database transactions employ parameterized queries via Python SQLite bindings to prevent SQL injection vulnerabilities.
+- **Input Sanitization & Escaping:** All HTML and Markdown inputs are strictly escaped before DOM insertion.
+- **Parameterized SQL:** All database transactions employ parameterized queries via Python SQLite bindings or psycopg2 to prevent SQL injection vulnerabilities.
 - **Zero Remote Leakage:** Vector embedding and indexing run purely local without sending document contents to third-party model providers.
+- **HTTP Security Headers:** Integrated middleware enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy`.
+- **Payload & File Restrictions:** File uploads are restricted to `.md`, `.txt`, and `.json` with a 5MB payload ceiling to prevent memory exhaustion.
 
 ---
 

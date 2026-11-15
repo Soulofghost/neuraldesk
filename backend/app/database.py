@@ -1,13 +1,30 @@
 import os
 import json
 import sqlite3
+import logging
 from pathlib import Path
 from contextlib import contextmanager
-from typing import Generator, Any, Optional
+from typing import Generator, Any, Optional, Dict
 from app.config import DB_PATH, DATABASE_URL
+
+logger = logging.getLogger("neuraldesk.database")
+
+# PostgreSQL Connection Pool (lazy initialization)
+_pg_pool = None
 
 def is_postgres_configured() -> bool:
     return bool(DATABASE_URL and (DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")))
+
+def _get_pg_pool():
+    global _pg_pool
+    if _pg_pool is None:
+        import psycopg2.pool
+        url = DATABASE_URL
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        # 1 to 10 connections for serverless concurrency
+        _pg_pool = psycopg2.pool.ThreadedConnectionPool(minconn=1, maxconn=10, dsn=url)
+    return _pg_pool
 
 def adapt_query(query: str, is_postgres: bool = False) -> str:
     if not is_postgres:
@@ -60,8 +77,9 @@ class PostgresCursorWrapper:
         return self._cursor.close()
 
 class PostgresConnectionWrapper:
-    def __init__(self, raw_conn):
+    def __init__(self, raw_conn, from_pool: bool = False):
         self._conn = raw_conn
+        self._from_pool = from_pool
 
     def cursor(self):
         import psycopg2.extras
@@ -74,7 +92,16 @@ class PostgresConnectionWrapper:
         return self._conn.rollback()
 
     def close(self):
-        return self._conn.close()
+        if self._from_pool and _pg_pool is not None:
+            try:
+                _pg_pool.putconn(self._conn)
+                return
+            except Exception as e:
+                logger.warning(f"Failed to return connection to pool: {e}")
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
     def execute(self, query: str, params: Any = None):
         cur = self.cursor()
@@ -83,15 +110,21 @@ class PostgresConnectionWrapper:
 
 def get_raw_connection():
     if is_postgres_configured():
-        import psycopg2
-        url = DATABASE_URL
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql://", 1)
-        raw_conn = psycopg2.connect(url)
-        return PostgresConnectionWrapper(raw_conn)
+        try:
+            pool = _get_pg_pool()
+            raw_conn = pool.getconn()
+            return PostgresConnectionWrapper(raw_conn, from_pool=True)
+        except Exception as e:
+            logger.warning(f"Connection pool unavailable, creating direct connection: {e}")
+            import psycopg2
+            url = DATABASE_URL
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
+            raw_conn = psycopg2.connect(url)
+            return PostgresConnectionWrapper(raw_conn, from_pool=False)
     else:
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=20.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
@@ -132,11 +165,17 @@ def init_db():
                 FOREIGN KEY (target_id) REFERENCES documents (id) ON DELETE CASCADE
             )
         """)
+        # Indexes for fast retrieval
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_category ON documents (category)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents (updated_at DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON document_chunks (document_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges (source_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges (target_id)")
         conn.commit()
         conn.close()
     else:
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=20.0)
         try:
             conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.OperationalError:
@@ -178,6 +217,12 @@ def init_db():
                 FOREIGN KEY (target_id) REFERENCES documents (id) ON DELETE CASCADE
             )
         """)
+        # Indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_category ON documents (category)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents (updated_at DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON document_chunks (document_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges (source_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges (target_id)")
         conn.commit()
         conn.close()
 
@@ -187,8 +232,9 @@ def get_db_connection() -> Generator[Any, None, None]:
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        logger.error(f"Database transaction error: {e}")
         raise
     finally:
         conn.close()

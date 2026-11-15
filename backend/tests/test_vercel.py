@@ -22,10 +22,14 @@ def test_vercel_serverless_entrypoint(monkeypatch):
     from api.index import app
     client = TestClient(app)
     
-    # 1. Health check
+    # 1. Health check & stats
     res_health = client.get("/api/v1/health")
     assert res_health.status_code == 200
     assert res_health.json()["status"] == "healthy"
+
+    res_stats = client.get("/api/v1/stats")
+    assert res_stats.status_code == 200
+    assert "total_documents" in res_stats.json()
     
     # 2. Redirects to OpenAPI docs
     res_docs = client.get("/api/docs", follow_redirects=False)
