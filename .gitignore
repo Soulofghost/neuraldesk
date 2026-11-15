@@ -26,3 +26,4 @@ wheels/
 *.db-shm
 .env
 data/
+.vercel

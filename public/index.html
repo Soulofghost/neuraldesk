@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuralDesk — AI Knowledge Architecture</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-glyph">ND</div>
+                <div class="brand-text">
+                    <span class="brand-title">NeuralDesk</span>
+                    <span class="brand-subtitle">Knowledge Graph Engine</span>
+                </div>
+            </div>
+
+            <div class="sidebar-action">
+                <button id="btn-new-doc" class="btn-primary">+ New Document</button>
+            </div>
+
+            <div class="category-filter">
+                <span class="section-label">CATEGORIES</span>
+                <div id="category-list" class="category-chips">
+                    <button class="chip active" data-category="ALL">All Nodes</button>
+                    <button class="chip" data-category="Architecture">Architecture</button>
+                    <button class="chip" data-category="Engineering">Engineering</button>
+                    <button class="chip" data-category="Research">Research</button>
+                    <button class="chip" data-category="General">General</button>
+                </div>
+            </div>
+
+            <div class="doc-list-container">
+                <div class="section-header">
+                    <span class="section-label">DOCUMENTS</span>
+                    <span id="doc-count" class="counter">0</span>
+                </div>
+                <div id="document-list" class="doc-tree">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="dot live"></span>
+                    <span class="status-label">SQLite WAL • Vector Index Active</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="main-workspace">
+            <header class="workspace-header">
+                <div class="header-search">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="hybrid-search-input" placeholder="Hybrid semantic search across knowledge base (e.g. 'consensus algorithms', 'memory caching')...">
+                    <span class="search-hint">Enter to query</span>
+                </div>
+                <div class="view-toggles">
+                    <button id="tab-doc" class="tab-btn active">Document View</button>
+                    <button id="tab-graph" class="tab-btn">Concept Graph</button>
+                </div>
+            </header>
+
+            <!-- Document Editor / Viewer Pane -->
+            <section id="doc-pane" class="workspace-pane active">
+                <div class="doc-metadata-bar">
+                    <input type="text" id="doc-title-input" class="doc-title-field" placeholder="Document Title...">
+                    <div class="metadata-controls">
+                        <select id="doc-category-select" class="select-field">
+                            <option value="General">General</option>
+                            <option value="Architecture">Architecture</option>
+                            <option value="Engineering">Engineering</option>
+                            <option value="Research">Research</option>
+                        </select>
+                        <input type="text" id="doc-tags-input" class="tags-field" placeholder="tags (comma separated)">
+                        <button id="btn-save-doc" class="btn-save">Save & Index</button>
+                        <button id="btn-delete-doc" class="btn-delete" style="display:none;">Delete</button>
+                    </div>
+                </div>
+
+                <div class="editor-container">
+                    <textarea id="doc-content-input" class="doc-editor" placeholder="Write markdown content or document documentation here... NeuralDesk automatically computes overlapping semantic chunks and graph relations on save."></textarea>
+                </div>
+
+                <div class="doc-drawer">
+                    <div class="drawer-header">
+                        <span class="drawer-title">Chunk & Relationship Telemetry</span>
+                        <span id="chunk-info" class="drawer-stats">0 Chunks Generated</span>
+                    </div>
+                    <div id="drawer-content" class="drawer-body">
+                        <div class="empty-state">Select or save a document to inspect indexed vector chunks and semantic graph connections.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Graph Canvas Pane -->
+            <section id="graph-pane" class="workspace-pane">
+                <div class="graph-toolbar">
+                    <span class="graph-legend"><span class="legend-dot arc"></span>Architecture</span>
+                    <span class="graph-legend"><span class="legend-dot eng"></span>Engineering</span>
+                    <span class="graph-legend"><span class="legend-dot res"></span>Research</span>
+                    <span class="graph-legend"><span class="legend-dot gen"></span>General</span>
+                    <button id="btn-refresh-graph" class="btn-subtle">Recalculate Topology</button>
+                </div>
+                <div class="graph-canvas-wrapper">
+                    <svg id="graph-svg" class="graph-canvas" width="100%" height="100%"></svg>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Search Modal -->
+    <div id="search-modal" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3>Hybrid Search Results</h3>
+                <button id="btn-close-modal" class="btn-close">&times;</button>
+            </div>
+            <div id="search-results-list" class="results-container">
+                <!-- Search results injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

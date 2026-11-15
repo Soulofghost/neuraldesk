@@ -79,6 +79,8 @@ graph TD
 
 ```
 neuraldesk/
+├── api/
+│   └── index.py                 # Vercel serverless function entrypoint
 ├── backend/
 │   ├── app/
 │   │   ├── engine/
@@ -89,24 +91,30 @@ neuraldesk/
 │   │   │   ├── documents.py     # Document CRUD & backlink routes
 │   │   │   ├── search.py        # Hybrid semantic search router
 │   │   │   └── graph.py         # Knowledge graph telemetry router
-│   │   ├── config.py            # Environment and runtime paths
-│   │   ├── database.py          # SQLite connection and migrations
+│   │   ├── config.py            # Environment, runtime paths & serverless detection
+│   │   ├── database.py          # SQLite connection, pragmas & migrations
 │   │   ├── main.py              # Application entrypoint & static mount
 │   │   └── schemas.py           # Pydantic request/response models
-│   ├── requirements.txt         # Production dependencies
+│   ├── requirements.txt         # Production backend dependencies
 │   └── tests/
 │       ├── test_chunker.py      # Chunking boundary unit tests
 │       ├── test_embeddings.py   # Embedding math & cosine tests
-│       └── test_api.py          # Full integration test suite
+│       ├── test_api.py          # Full integration test suite
+│       └── test_vercel.py       # Vercel serverless entrypoint tests
 ├── frontend/
 │   ├── index.html               # Semantic HTML5 layout
 │   ├── style.css                # Obsidian & amber design system
 │   └── app.js                   # State manager & SVG graph renderer
+├── public/                      # Static assets served via Vercel Edge CDN
 ├── .github/workflows/ci.yml     # Automated test workflow
 ├── .env.example                 # Environment defaults
 ├── .gitignore                   # Standard ignore rules
+├── .python-version              # Target Python runtime (3.12)
+├── .vercelignore                # Files excluded from Vercel deployment
 ├── Dockerfile                   # Multi-stage production container
 ├── docker-compose.yml           # Local deployment manifest
+├── requirements.txt             # Root dependency manifest for Vercel
+├── vercel.json                  # Vercel routing, rewrites & headers config
 ├── LICENSE                      # MIT License
 └── README.md                    # System documentation
 ```
@@ -195,6 +203,34 @@ pytest backend/tests/ -v
 ---
 
 ## 14. Deployment Instructions
+
+### Vercel Serverless Deployment (Recommended)
+
+NeuralDesk is configured with zero-config Vercel serverless integration. The frontend is served globally via Vercel Edge CDN while the FastAPI engine runs as a Python Serverless Function (`api/index.py`).
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FSoulofghost%2Fneuraldesk)
+
+#### Option A: One-Click Web Dashboard
+1. Go to [Vercel Dashboard](https://vercel.com/new) and click **Import Git Repository**.
+2. Select `Soulofghost/neuraldesk`.
+3. Vercel automatically detects `vercel.json`, `public/`, and `api/index.py`.
+4. Click **Deploy**. No custom build settings or environment variables are required.
+
+#### Option B: Deploy via Vercel CLI
+```bash
+# Install Vercel CLI globally
+npm i -g vercel
+
+# Authenticate and deploy
+vercel
+```
+
+#### Vercel Serverless Architecture Highlights:
+- **Zero-Cold-Start Static Serving:** Pure HTML5/CSS3 assets in `public/` are served from Vercel's global Edge Network.
+- **Dynamic Serverless API:** All `/api/v1/*` routes and `/docs` are rewritten to `api/index.py` using Python 3.12 runtime.
+- **Serverless SQLite Engine:** Automatically adapts SQLite persistence to `/tmp` in serverless runtimes with automated database seeding.
+
+---
 
 ### Docker Deployment
 ```bash

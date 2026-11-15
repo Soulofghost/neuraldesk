@@ -1,12 +1,21 @@
 import sqlite3
 import json
+from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator
 from app.config import DB_PATH
 
 def init_db():
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("PRAGMA journal_mode=DELETE")
+        except sqlite3.OperationalError:
+            pass
+    conn.execute("PRAGMA foreign_keys = ON")
     cursor = conn.cursor()
     
     cursor.execute("""
@@ -51,6 +60,7 @@ def init_db():
 def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
     finally:
